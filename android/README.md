@@ -15,12 +15,20 @@ We've got the first Bluetooth greeting working on two real Android phones. Now w
 
 1. Get the APK from a successful **Android debug build** in GitHub Actions.
 2. Install the new build on both phones and keep Yap open.
-3. Open **Network** and tap **Make this phone discoverable** on both phones. Wait for **Yap is visible to nearby phones**.
-4. Open **Chats → Bluetooth test chat** on phone A, type a short message such as `Hi from A`, and tap **Send**. The composer counts UTF-8 bytes and disables sending above 20 bytes.
+3. Open **Network → Manage connections** and tap **Make this phone discoverable** on both phones. Wait for **Yap is visible to nearby phones**.
+4. Open **Chats → Nearby Yap phone** on phone A, type a short message such as `Hi from A`, and tap **Send**. The composer counts UTF-8 bytes and disables sending above 20 bytes.
 5. Phone B should show an incoming message bubble. Phone A should show **Bluetooth acknowledged** below its outgoing bubble. This confirms the GATT write only; receipt and reading are not confirmed.
 6. Repeat from phone B to phone A.
 
 If a message fails, record the status text and the phone models. The sender's confirmation only means the Bluetooth write was acknowledged, not that a person read the message.
+
+## The approved interface
+
+The app follows the [approved v2 concept](../design/proposals/yap-refined-six-screen-v2.png): a compact chat list, full-height conversations, a living network visualisation, framed message details, group details and settings.
+
+The default mode uses real Bluetooth events. Tap a message for its local send/receive details. Recipient delivery remains unconfirmed; Bluetooth acknowledgement is not a delivery receipt. The network shows only observed Bluetooth activity, with no invented devices or internet routes. Local message history and drafts survive rotation but are not saved to disk.
+
+Open **Settings → Preview the full design** to explore all six screens with sample data, including the mesh/internet topology and group details. Every preview screen is labelled. Sending, discoverability changes and clearing live history are disabled in the preview. Exit preview to return to live Bluetooth messaging.
 
 ## Build and automated checks
 
@@ -34,7 +42,7 @@ From `android/`:
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-On macOS/Linux, use `./gradlew` with the same tasks. Unit tests cover the UI's handling of existing BLE callbacks, acknowledgements, errors and UTF-8 limits. Device tests cover the composer, navigation and network/settings screens. They do not verify radio exchange between two phones.
+On macOS/Linux, use `./gradlew` with the same tasks. Unit tests cover existing BLE callbacks, acknowledgement times, errors, UTF-8 limits, local unread counts and history clearing. Device tests cover the composer, navigation, activity recreation, all six preview screens, and separation of live data from the preview. They do not verify radio exchange between two phones.
 
 ## What's next
 

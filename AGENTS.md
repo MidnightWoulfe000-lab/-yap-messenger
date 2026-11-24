@@ -8,7 +8,7 @@ Before making architectural, messaging, identity, encryption, routing or group c
 
 ## Design direction
 
-Read [docs/design-system.md](docs/design-system.md) before changing the interface. Our reference is the **first six-screen Yap mockup**: dark ink, electric lime, cobalt, restrained coral, expressive typography and a living network visualisation. The later, busier mockups are not our target.
+Read [docs/design-system.md](docs/design-system.md) before changing the interface. Our reference is the **approved refined six-screen v2 mockup**, based on the first concept: dark ink, electric lime, cobalt, restrained coral, expressive typography and a living network visualisation. The approved image is linked from the design document; unrelated, busier alternatives are not our target.
 
 ## Design review
 

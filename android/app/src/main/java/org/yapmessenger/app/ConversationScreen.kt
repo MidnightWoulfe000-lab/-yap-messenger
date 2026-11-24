@@ -1,0 +1,122 @@
+package org.yapmessenger.app
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+
+@Composable
+internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, preview: Boolean,
+    draft: String, onDraft: (String) -> Unit, pending: Boolean, status: String, send: () -> Unit,
+    back: () -> Unit, controls: () -> Unit, group: () -> Unit, details: (Long) -> Unit) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size, pending) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = White) }
+            YapAvatar(if (preview) chat.name else "", chat.group, 40)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).then(if (chat.group) Modifier.clickable(onClickLabel = "Group details", onClick = group) else Modifier)) {
+                Text(chat.name, color = White, style = MaterialTheme.typography.titleMedium)
+                Text(when {
+                    chat.group -> "Sample group · 6 members"
+                    preview && chat.id == "maya" -> "Internet · Identity not checked"
+                    preview && chat.id == "updates" -> "Sample app updates"
+                    else -> "Direct Bluetooth · Identity not checked"
+                },
+                    color = Soft, style = MaterialTheme.typography.labelMedium)
+            }
+            IconButton(onClick = controls) { Icon(Icons.Default.MoreVert, "Bluetooth controls", tint = White) }
+        }
+        HorizontalDivider(color = Surface2)
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item {
+                if (!preview) InfoNote("Test chat · Not encrypted · Don't share private information", accent = Coral)
+                else Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("Today", color = Soft, style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.background(Surface, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+            }
+            if (messages.isEmpty()) item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Forum, null, tint = Lime, modifier = Modifier.size(42.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text("Say something.", style = MaterialTheme.typography.headlineMedium, color = White)
+                    Text("Two phones. No internet. Just Yap.", color = Soft, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+            items(messages, key = { it.id }) { MessageBubble(it) { details(it.id) } }
+            if (!preview) item {
+                Text(status, style = MaterialTheme.typography.bodySmall, color = Soft,
+                    modifier = Modifier.padding(vertical = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            }
+        }
+        if (preview) Text("Preview only · Sending is disabled", style = MaterialTheme.typography.labelMedium, color = Soft,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
+        Composer(draft = if (preview) "" else draft, onDraft = onDraft, pending = pending, enabled = !preview, send = send)
+    }
+}
+
+@Composable
+private fun MessageBubble(message: ChatMessage, details: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
+        val file = message.fileName != null
+        Column(Modifier.widthIn(max = 290.dp).background(if (file) Blue else if (message.mine) Lime else Surface,
+            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (message.mine) 18.dp else 5.dp,
+                bottomEnd = if (message.mine) 5.dp else 18.dp))
+            .clickable(onClickLabel = "Message details", role = Role.Button, onClick = details)
+            .padding(horizontal = 14.dp, vertical = 12.dp)) {
+            if (file) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Description, null, tint = White, modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column { Text(message.fileName.orEmpty(), color = White, fontWeight = FontWeight.SemiBold); Text(message.fileSize.orEmpty(), color = White, style = MaterialTheme.typography.labelMedium) }
+                }
+            } else Text(message.body, color = if (message.mine) Ink else White, style = MaterialTheme.typography.bodyLarge)
+            if (message.createdAt > 0) Text(messageTime(if (file) message.recipientReceiptAt ?: message.acknowledgedAt ?: message.createdAt else message.createdAt),
+                color = if (message.mine && !file) Ink.copy(alpha = .75f) else White,
+                style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.End).padding(top = 5.dp))
+        }
+        if (message.state.isNotEmpty()) Text(message.state, color = if (message.failureReason != null) Coral else Soft,
+            style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 5.dp))
+    }
+}
+
+@Composable
+private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean, enabled: Boolean, send: () -> Unit) {
+    val bytes = draft.toByteArray(Charsets.UTF_8).size
+    val canSend = enabled && bytes in 1..20 && !pending
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedTextField(value = draft, onValueChange = onDraft, enabled = enabled, label = { Text("Message") },
+                singleLine = true, isError = bytes > 20, shape = RoundedCornerShape(28.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lime, unfocusedBorderColor = Soft,
+                    focusedContainerColor = Surface, unfocusedContainerColor = Surface, errorContainerColor = Surface, cursorColor = Lime),
+                modifier = Modifier.weight(1f))
+            FilledIconButton(onClick = send, enabled = canSend, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.AutoMirrored.Filled.Send, "Send")
+            }
+        }
+        if (enabled) Text(when { pending -> "Sending… Keep Yap open."; bytes > 20 -> "$bytes / 20 UTF-8 bytes · Shorten your message"; else -> "$bytes / 20 UTF-8 bytes" },
+            color = if (bytes > 20) Coral else Soft, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 14.dp, top = 6.dp))
+    }
+}
