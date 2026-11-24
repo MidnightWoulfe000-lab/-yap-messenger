@@ -37,6 +37,8 @@ class YapBluetooth(
     private var outgoing: ByteArray? = null
     private var advertiseRequested = false
     private val seen = mutableSetOf<String>()
+    private var scanGeneration = 0
+    private var connectionGeneration = 0
 
     private val serverCallback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
@@ -143,6 +145,15 @@ class YapBluetooth(
             if (client == null) {
                 stopScan()
                 client = result.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                val generation = ++connectionGeneration
+                main.postDelayed({
+                    if (generation == connectionGeneration && client != null && !messageDelivered) {
+                        client?.disconnect()
+                        client?.close()
+                        client = null
+                        report("Connection timed out. Try sending again.")
+                    }
+                }, 12_000)
             }
         }
         override fun onScanFailed(errorCode: Int) {
@@ -195,7 +206,7 @@ class YapBluetooth(
             return
         }
         if (client != null || scanning) {
-            report("Already looking for a phone. Please wait.")
+            report("Still connecting. Please wait a moment before sending again.")
             return
         }
         outgoing = bytes
@@ -215,17 +226,25 @@ class YapBluetooth(
         bleScanner.startScan(listOf(filter), settings, scanCallback)
         scanning = true
         report("Looking for another phone running Yap...")
-        main.postDelayed({ stopScan() }, 15_000)
+        val generation = ++scanGeneration
+        main.postDelayed({
+            if (generation == scanGeneration && scanning) {
+                stopScan()
+                report("No nearby Yap phone found. Try again.")
+            }
+        }, 15_000)
     }
 
     private fun stopScan() {
         if (!scanning) return
         scanning = false
+        scanGeneration++
         try { scanner?.stopScan(scanCallback) } catch (_: SecurityException) { }
     }
 
     fun stop() {
         advertiseRequested = false
+        connectionGeneration++
         stopScan()
         try { advertiser?.stopAdvertising(advertiseCallback) } catch (_: SecurityException) { }
         advertising = false
