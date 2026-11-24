@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/target/
+# Android
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+# iOS / Xcode
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.build/
+.swiftpm/
+# Secrets
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
