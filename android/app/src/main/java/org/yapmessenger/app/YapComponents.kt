@@ -1,6 +1,7 @@
 package org.yapmessenger.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -38,9 +40,12 @@ internal fun Wordmark() {
 
 @Composable
 internal fun YapAvatar(name: String = "", group: Boolean = false, size: Int = 52) {
-    Box(Modifier.size(size.dp).background(if (group) Lime else Blue, CircleShape), contentAlignment = Alignment.Center) {
-        Icon(if (group) Icons.Default.Groups else if (name.isEmpty()) Icons.Default.Bluetooth else Icons.Default.Person,
-            null, tint = if (group) Ink else White, modifier = Modifier.size((size * .58f).dp))
+    val accent = if (group) Lime else if (name.startsWith("M") || name.startsWith("P")) Coral else Blue
+    Box(Modifier.size(size.dp).background(if (group) Lime else accent.copy(alpha = .17f), CircleShape)
+        .border(1.dp, accent.copy(alpha = if (group) 1f else .45f), CircleShape), contentAlignment = Alignment.Center) {
+        if (group || name.isEmpty()) Icon(if (group) Icons.Outlined.Groups else Icons.Outlined.PhoneAndroid,
+            null, tint = if (group) Ink else White, modifier = Modifier.size((size * .5f).dp))
+        else Text(name.take(1), fontSize = (size * .37f).sp, fontWeight = FontWeight.Bold, color = White)
     }
 }
 
@@ -79,10 +84,12 @@ internal fun DetailRow(title: String, subtitle: String, icon: ImageVector, onCli
 
 @Composable
 internal fun YapNavigation(screen: String, navigate: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Surface.copy(alpha = .45f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+    Column {
+    HorizontalDivider(color = Surface2.copy(alpha = .55f))
+    Row(Modifier.fillMaxWidth().background(Ink)
         .padding(horizontal = 12.dp, vertical = 8.dp)) {
-        listOf(Triple("chats", "Chats", Icons.Default.ChatBubbleOutline), Triple("network", "Network", Icons.Default.Hub),
-            Triple("settings", "Settings", Icons.Default.Settings)).forEach { (key, title, icon) ->
+        listOf(Triple("chats", "Chats", Icons.Outlined.ChatBubbleOutline), Triple("network", "Network", Icons.Outlined.DeviceHub),
+            Triple("settings", "Settings", Icons.Outlined.Settings)).forEach { (key, title, icon) ->
             val selected = key == screen
             Column(Modifier.weight(1f).heightIn(min = 56.dp).selectable(selected, role = Role.Tab, onClick = { navigate(key) })
                 .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -93,5 +100,6 @@ internal fun YapNavigation(screen: String, navigate: (String) -> Unit) {
                 Text(title, style = MaterialTheme.typography.labelMedium, color = if (selected) Lime else Soft)
             }
         }
+    }
     }
 }

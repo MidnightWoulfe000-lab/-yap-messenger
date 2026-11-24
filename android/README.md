@@ -15,7 +15,7 @@ We've got the first Bluetooth greeting working on two real Android phones. Now w
 
 1. Get the APK from a successful **Android debug build** in GitHub Actions.
 2. Install the new build on both phones and keep Yap open.
-3. Open **Network → Manage connections** and tap **Make this phone discoverable** on both phones. Wait for **Yap is visible to nearby phones**.
+3. Open **Network**, tap the top-right connection controls, then **Make this phone discoverable** on both phones. Wait for **Yap is visible to nearby phones**. The **Make yourself visible** row opens the same controls.
 4. Open **Chats → Nearby Yap phone** on phone A, type a short message such as `Hi from A`, and tap **Send**. The composer counts UTF-8 bytes and disables sending above 20 bytes.
 5. Phone B should show an incoming message bubble. Phone A should show **Bluetooth acknowledged** below its outgoing bubble. This confirms the GATT write only; receipt and reading are not confirmed.
 6. Repeat from phone B to phone A.

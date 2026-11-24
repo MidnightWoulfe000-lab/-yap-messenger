@@ -54,13 +54,9 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = Surface2)
-            if (!preview) {
-                Text("Bluetooth prototype · Not encrypted", color = Soft, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(vertical = 16.dp))
-            }
         }
         items(visible, key = { it.id }) { chat ->
-            Row(Modifier.fillMaxWidth().clickable { open(chat.id) }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { open(chat.id) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 YapAvatar(chat.name.takeIf { preview } ?: "", chat.group)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
@@ -69,7 +65,7 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                     Text(chat.snippet, style = MaterialTheme.typography.bodyMedium, color = Soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.width(8.dp))
-                Column(horizontalAlignment = Alignment.End) {
+                Column(Modifier.align(Alignment.Top).padding(top = 3.dp), horizontalAlignment = Alignment.End) {
                     if (chat.time.isNotEmpty()) Text(chat.time, style = MaterialTheme.typography.labelSmall, color = Soft)
                     if (chat.unread > 0) {
                         Spacer(Modifier.height(8.dp))
@@ -79,7 +75,7 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                     }
                 }
             }
-            HorizontalDivider(color = Surface2.copy(alpha = .6f))
+            HorizontalDivider(color = Surface2.copy(alpha = .55f), modifier = Modifier.padding(start = 66.dp))
         }
         if (visible.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(vertical = 48.dp)) {

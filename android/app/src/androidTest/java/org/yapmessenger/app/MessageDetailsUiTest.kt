@@ -4,6 +4,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,5 +45,24 @@ class MessageDetailsUiTest {
             assertEquals(0, discover)
             assertEquals("Keep this", session.messages.single().body)
         }
+    }
+
+    @Test fun networkKeepsYourPhoneCentredWhenAPeerIsSeen() {
+        val session = ChatSession()
+        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}) } }
+        compose.onNodeWithText("Network").performClick()
+        fun checkCentre() {
+            val map = compose.onNodeWithTag("network-map").fetchSemanticsNode().boundsInRoot
+            val phone = compose.onNodeWithTag("network-self").fetchSemanticsNode().boundsInRoot
+            assertTrue("Phone must stay horizontally centred", kotlin.math.abs(map.center.x - phone.center.x) <= 1f)
+            assertTrue("Phone must stay vertically centred", kotlin.math.abs(map.center.y - phone.center.y) <= 1f)
+        }
+        checkCentre()
+        compose.runOnIdle { session.onBluetoothUpdate("Message received: hi") }
+        compose.onNodeWithText("1 device seen").assertExists()
+        checkCentre()
+        compose.runOnIdle { session.onBluetoothUpdate("Connected. Sending message...") }
+        compose.onNodeWithText("Connected · Bluetooth").assertExists()
+        checkCentre()
     }
 }

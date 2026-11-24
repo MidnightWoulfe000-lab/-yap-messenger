@@ -1,19 +1,21 @@
 package org.yapmessenger.app
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -21,46 +23,43 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SettingsScreen(open: (String) -> Unit, preview: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Settings", style = MaterialTheme.typography.headlineLarge, color = White, modifier = Modifier.weight(1f))
-            if (LocalDensity.current.fontScale <= 1.3f) Canvas(Modifier.size(width = 72.dp, height = 56.dp)) {
-                val w = size.width
-                val h = size.height
-                val ribbon = Path().apply {
-                    moveTo(w * .62f, 0f)
-                    cubicTo(w * .18f, h * .42f, w * .1f, h * .74f, w * .55f, h * .66f)
-                    cubicTo(w * .98f, h * .52f, w, h * .88f, w, h)
-                    lineTo(w, h * .56f)
-                    cubicTo(w * .9f, h * .35f, w * .6f, h * .45f, w * .56f, h * .33f)
-                    cubicTo(w * .52f, h * .22f, w * .68f, h * .07f, w * .72f, 0f)
-                    close()
-                }
-                drawPath(ribbon, Lime)
+        Text("Settings", style = MaterialTheme.typography.headlineLarge, color = White)
+        Spacer(Modifier.height(28.dp))
+        Column(Modifier.clip(RoundedCornerShape(20.dp)).background(Surface)
+            .border(1.dp, Surface2.copy(alpha = .6f), RoundedCornerShape(20.dp))) {
+            listOf(
+                Triple("Network & connections", "Visibility and connections", Icons.Outlined.DeviceHub),
+                Triple("Privacy & identity", "Identity and security", Icons.Outlined.Lock),
+                Triple("Notifications", "Messages and groups", Icons.Outlined.NotificationsNone),
+                Triple("Appearance", "Theme, text and motion", Icons.Outlined.Palette),
+                Triple("Data & storage", "History and storage", Icons.Outlined.Storage),
+                Triple("About Yap", "Version 0.1.0-dev", Icons.Outlined.Info)
+            ).forEachIndexed { index, (title, subtitle, icon) ->
+                if (index > 0) HorizontalDivider(color = Surface2.copy(alpha = .6f), modifier = Modifier.padding(start = 56.dp, end = 16.dp))
+                SettingsRow(title, subtitle, icon) { open(title) }
             }
         }
         Spacer(Modifier.height(24.dp))
-        listOf(
-            Triple("Network & connections", "Visibility and Bluetooth", Icons.Default.Hub),
-            Triple("Privacy & identity", "Identity checks and safety", Icons.Default.Lock),
-            Triple("Notifications", "Messages and groups", Icons.Default.NotificationsNone),
-            Triple("Appearance", "Text size and motion", Icons.Default.Palette),
-            Triple("Data & storage", "Session history", Icons.Default.Storage),
-            Triple("About Yap", "Experimental Bluetooth prototype", Icons.Default.Info)
-        ).forEach { (title, subtitle, icon) ->
-            DetailRow(title, subtitle, icon) { open(title) }
-            Spacer(Modifier.height(3.dp))
-        }
-        Spacer(Modifier.height(24.dp))
-        OutlinedButton(onClick = preview, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(20.dp))
+        TextButton(onClick = preview, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Icon(Icons.Outlined.Visibility, null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(10.dp))
             Text("Preview the full design")
         }
-        Text("Explore the six-screen concept with sample data. Preview actions never send Bluetooth messages.",
-            color = Soft, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
-        Spacer(Modifier.height(24.dp))
-        Text("Nobody gets to silence you.", color = Lime, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun SettingsRow(title: String, subtitle: String, icon: ImageVector, open: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = open).heightIn(min = 72.dp)
+        .padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Soft, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = White, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, color = Soft, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.width(12.dp))
+        Icon(Icons.Default.ChevronRight, null, tint = Soft, modifier = Modifier.size(20.dp))
     }
 }
 

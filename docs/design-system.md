@@ -12,12 +12,15 @@ The board uses sample data and includes planned features. It does not authorise 
 
 | Role | Colour |
 | --- | --- |
-| Ink background | `#171923` |
+| Ink background | `#0D1018` |
+| Raised surface | `#191E2B` |
 | Electric lime | `#C7FF3C` |
 | Cobalt | `#314CFF` |
 | Coral accent | `#FF7958` |
 
 These are starting brand tokens, not a complete accessible palette. Test contrast on actual surfaces before using any pairing.
+
+The native implementation keeps the original Android type family and weights, with outline icons, quieter surfaces and inset separators. The ink background is deeper than the initial token so the network fabric and lime controls have clearer contrast. Settings uses a plain heading and grouped rows; the detached corner flourish has been removed.
 
 ## Layout and interaction
 
@@ -25,13 +28,15 @@ These are starting brand tokens, not a complete accessible palette. Test contras
 - Keep the chat list compact, with the wordmark, search, new chat and All/Groups/Unread filters. Conversations and detail screens use Back navigation without the primary tab bar.
 - Conversations should be immediately usable, with a clear composer and readable bubbles.
 - Network view: display only verified facts from the actual connection layer. Discovery does not equal trust.
-- The living network visualisation is a signature of Yap. Use a quiet, gently moving particle fabric with a stronger foreground connection diagram. Solid lime links denote local connections; dashed cobalt links denote internet connections. Always include a text legend. Node positions are abstract, not geographical distances. Respect both Android's Remove animations setting and the in-app Reduce motion control.
+- The living network visualisation is a signature of Yap. A continuous, gently moving particle fabric surrounds the centred local phone, with peers arranged around it. Solid lime links denote local connections; dashed cobalt links denote internet connections. A text legend accompanies the links being shown. Node positions are abstract, not geographical distances. Respect both Android's Remove animations setting and the in-app Reduce motion control.
 - Live mode currently shows only local Bluetooth observations. Do not draw persistent connections after a write disconnects, or invent peers, relays or internet links. A received message does not establish an authenticated identity.
 - Message journey: show as an optional detail view. Display local events that were observed; show route information only when routing data exists.
 - Use the approved rounded, lime-framed vertical timeline. Live message details show observed local attempt and Bluetooth acknowledgement times, with recipient delivery explicitly unconfirmed. Do not call an attempt a queued message when no queue exists. The completed Queued/Sent to peer/Delivered journey belongs to the labelled future-state preview until its supporting protocol exists.
 - Prefer restrained pulses and transitions; honour reduced-motion settings.
 - Use scalable text, adequate contrast and Android touch targets of at least 48dp.
 - Keep queued, relayed, acknowledged and delivered states distinct. A BLE write acknowledgement is not proof a person received or read a message.
+
+Primary screens use short product labels. Connection limits, identity checks and security details remain available in Connections and Privacy & identity, rather than repeated prototype banners, geometry explanations or planned-transport legends. Live status still distinguishes a connected phone from one seen recently. Preview sample labels and unconfirmed recipient receipts remain explicit.
 
 ## Live mode and design preview
 

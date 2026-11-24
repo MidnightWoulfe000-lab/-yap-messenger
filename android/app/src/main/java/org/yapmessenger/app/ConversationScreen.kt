@@ -37,9 +37,9 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                 Text(chat.name, color = White, style = MaterialTheme.typography.titleMedium)
                 Text(when {
                     chat.group -> "Sample group · 6 members"
-                    preview && chat.id == "maya" -> "Internet · Identity not checked"
+                    preview && chat.id == "maya" -> "Internet"
                     preview && chat.id == "updates" -> "Sample app updates"
-                    else -> "Direct Bluetooth · Identity not checked"
+                    else -> "Direct Bluetooth"
                 },
                     color = Soft, style = MaterialTheme.typography.labelMedium)
             }
@@ -49,8 +49,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
-                if (!preview) InfoNote("Test chat · Not encrypted · Don't share private information", accent = Coral)
-                else Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text("Today", color = Soft, style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.background(Surface, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
@@ -64,7 +63,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                 }
             }
             items(messages, key = { it.id }) { MessageBubble(it) { details(it.id) } }
-            if (!preview) item {
+            if (!preview && (pending || messages.lastOrNull()?.failureReason != null || status.contains("permission", true))) item {
                 Text(status, style = MaterialTheme.typography.bodySmall, color = Soft,
                     modifier = Modifier.padding(vertical = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
             }
@@ -106,11 +105,14 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
     val canSend = enabled && bytes in 1..20 && !pending
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(value = draft, onValueChange = onDraft, enabled = enabled, label = { Text("Message") },
+            TextField(value = draft, onValueChange = onDraft, enabled = enabled, placeholder = { Text("Message") },
                 singleLine = true, isError = bytes > 20, shape = RoundedCornerShape(28.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lime, unfocusedBorderColor = Soft,
-                    focusedContainerColor = Surface, unfocusedContainerColor = Surface, errorContainerColor = Surface, cursorColor = Lime),
+                colors = TextFieldDefaults.colors(focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    errorIndicatorColor = Coral, focusedContainerColor = Surface, unfocusedContainerColor = Surface,
+                    disabledContainerColor = Surface, errorContainerColor = Surface, cursorColor = Lime),
                 modifier = Modifier.weight(1f))
             FilledIconButton(onClick = send, enabled = canSend, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
