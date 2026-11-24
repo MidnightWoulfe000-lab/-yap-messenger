@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.EditText
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -24,7 +25,7 @@ class MainActivity : Activity() {
         }
         layout.addView(TextView(this).apply { text = "yap."; textSize = 36f })
         layout.addView(TextView(this).apply {
-            text = "Nobody gets to silence you.\n\nExperimental Bluetooth test. No secure messaging yet."
+            text = "Nobody gets to silence you.\n\nExperimental Bluetooth messages. No encryption or identity checks yet."
             textSize = 17f
         })
         status = TextView(this).apply { text = "Ready to find another Yap phone."; textSize = 16f }
@@ -33,9 +34,17 @@ class MainActivity : Activity() {
             text = "Make this phone discoverable"
             setOnClickListener { withBluetoothPermissions { bluetooth.startAdvertising() } }
         })
+        val messageInput = EditText(this).apply {
+            hint = "Type a short message (20 bytes max)"
+            setSingleLine(true)
+        }
+        layout.addView(messageInput)
         layout.addView(Button(this).apply {
-            text = "Find another Yap phone"
-            setOnClickListener { withBluetoothPermissions { bluetooth.scan() } }
+            text = "Send to nearby Yap phone"
+            setOnClickListener {
+                val message = messageInput.text.toString()
+                withBluetoothPermissions { bluetooth.send(message) }
+            }
         })
         setContentView(layout)
     }
