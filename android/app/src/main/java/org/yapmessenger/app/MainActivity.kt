@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+        requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100) {
@@ -373,7 +373,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
                     ), cursorBrush = androidx.compose.ui.graphics.SolidColor(Lime),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = send),
+                    keyboardActions = KeyboardActions(onSend = { send() }),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
