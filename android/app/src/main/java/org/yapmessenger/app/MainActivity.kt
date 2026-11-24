@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private var currentScreen = "chats"
     private var inputDraft = ""
     private var composerField: EditText? = null
+    private var messageContainer: LinearLayout? = null
     private val messages = mutableListOf<Pair<Boolean, String>>()
     private var lastOutgoing: String? = null
 
@@ -56,13 +57,14 @@ class MainActivity : Activity() {
                     lastOutgoing?.let { messages.add(true to it) }
                     lastOutgoing = null
                 }
-                if (currentScreen == "conversation" || currentScreen == "network" || currentScreen == "chats") {
-                    if (currentScreen == "conversation") {
-                        if (update.startsWith("Message received: ") ||
-                            update == "Message delivered to the other phone.") {
-                            if (composerField?.hasFocus() != true) render()
-                        }
-                    } else render()
+                if (currentScreen == "conversation") {
+                    // Update messages without replacing the focused EditText or keyboard.
+                    messageContainer?.let { container ->
+                        container.removeAllViews()
+                        conversationMessages(container)
+                    }
+                } else if (currentScreen == "network" || currentScreen == "chats") {
+                    render()
                 }
             }
         }
@@ -111,6 +113,7 @@ class MainActivity : Activity() {
                 isVerticalScrollBarEnabled = false
             }
             val messagesBody = column().apply { pad(this, 20, 18, 20, 18) }
+            messageContainer = messagesBody
             conversationMessages(messagesBody)
             scroll.addView(messagesBody)
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -130,6 +133,7 @@ class MainActivity : Activity() {
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             root.addView(navigation())
             composerField = null
+            messageContainer = null
         }
         // Edge-to-edge Android versions may draw our header under the status bar
         // and our composer under the keyboard. Respect the real window insets.
