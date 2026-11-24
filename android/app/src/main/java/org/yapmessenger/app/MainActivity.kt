@@ -93,7 +93,7 @@ class MainActivity : Activity() {
     private fun render() {
         root = column().apply { setBackgroundColor(ink) }
         val content = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
             isVerticalScrollBarEnabled = false
         }
         val body = column().apply { pad(this, 22, 24, 22, 16) }
