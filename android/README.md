@@ -15,12 +15,26 @@ We've got the first Bluetooth greeting working on two real Android phones. Now w
 
 1. Get the APK from a successful **Android debug build** in GitHub Actions.
 2. Install the new build on both phones and keep Yap open.
-3. Tap **Make this phone discoverable** on both phones. Wait for the visible confirmation.
-4. On phone A, type a short message, such as `Hi from A`, and tap **Send to nearby Yap phone**.
-5. Phone B should show **Message received: Hi from A**. Phone A should show **Message delivered to the other phone**.
+3. Open **Network** and tap **Make this phone discoverable** on both phones. Wait for **Yap is visible to nearby phones**.
+4. Open **Chats → Bluetooth test chat** on phone A, type a short message such as `Hi from A`, and tap **Send**. The composer counts UTF-8 bytes and disables sending above 20 bytes.
+5. Phone B should show an incoming message bubble. Phone A should show **Bluetooth acknowledged** below its outgoing bubble. This confirms the GATT write only; receipt and reading are not confirmed.
 6. Repeat from phone B to phone A.
 
 If a message fails, record the status text and the phone models. The sender's confirmation only means the Bluetooth write was acknowledged, not that a person read the message.
+
+## Build and automated checks
+
+Install Java 17 and Android SDK platform 35 with Build Tools 34.0.0, then set `JAVA_HOME` and `ANDROID_HOME`. The checked-in wrapper downloads Gradle 8.9 and verifies its SHA-256 checksum.
+
+From `android/`:
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+# With an emulator or Android phone connected:
+.\gradlew.bat :app:connectedDebugAndroidTest
+```
+
+On macOS/Linux, use `./gradlew` with the same tasks. Unit tests cover the UI's handling of existing BLE callbacks, acknowledgements, errors and UTF-8 limits. Device tests cover the composer, navigation and network/settings screens. They do not verify radio exchange between two phones.
 
 ## What's next
 

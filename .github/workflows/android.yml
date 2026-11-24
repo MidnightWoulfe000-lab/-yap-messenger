@@ -26,13 +26,21 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
       # GitHub Ubuntu runners already have an Android SDK installed.
       # Avoid a separate setup action until we need custom SDK tooling.
-      - name: Build Yap debug APK
+      - name: Build, test and lint Yap
         working-directory: android
-        run: gradle --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+      - name: Save test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yap-android-checks
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Save APK for testing
         uses: actions/upload-artifact@v4
         with:

@@ -1,23 +1,27 @@
 package org.yapmessenger.app
 
 import android.Manifest
-import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -31,73 +35,46 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Ink = Color(0xFF171923)
-private val Surface = Color(0xFF22283A)
-private val Surface2 = Color(0xFF2A3248)
-private val Lime = Color(0xFFC7FF3C)
-private val Blue = Color(0xFF4965FF)
-private val Coral = Color(0xFFFF7958)
-private val Soft = Color(0xFFA8B1C8)
-private val White = Color(0xFFF7F8FF)
-
-private data class ChatMessage(val mine: Boolean, val body: String, val state: String = "")
-
 class MainActivity : ComponentActivity() {
     private lateinit var bluetooth: YapBluetooth
-    private var status by mutableStateOf("Ready to connect")
+    private val session = ChatSession()
     private var screen by mutableStateOf("chats")
-    private var draft by mutableStateOf("")
-    private var pendingText: String? = null
-    private val messages = mutableStateListOf<ChatMessage>()
     private var permissionAction: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.rgb(23, 25, 35)
-        window.navigationBarColor = android.graphics.Color.rgb(23, 25, 35)
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.rgb(23, 25, 35)),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.rgb(23, 25, 35))
+        )
         bluetooth = YapBluetooth(this) { update ->
             runOnUiThread {
-                status = update
-                when {
-                    update.startsWith("Message received: ") ->
-                        messages.add(ChatMessage(false, update.removePrefix("Message received: ")))
-                    update == "Message delivered to the other phone." -> {
-                        val sent = pendingText
-                        if (sent != null) {
-                            messages.add(ChatMessage(true, sent, "Sent to nearby phone"))
-                            if (draft == sent) draft = ""
-                        }
-                        pendingText = null
-                    }
-                    update.contains("failed", true) || update.contains("timed out", true) ||
-                        update.startsWith("No nearby") || update.startsWith("Disconnected before") ->
-                        pendingText = null
-                }
+                session.onBluetoothUpdate(update)
             }
         }
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(
-                primary = Lime, background = Ink, surface = Surface, onSurface = White
-            )) {
+            YapTheme {
                 YapApp(
                     screen = screen,
                     navigate = { screen = it },
-                    draft = draft,
-                    onDraft = { draft = it },
-                    messages = messages,
-                    status = status,
-                    pending = pendingText != null,
+                    draft = session.draft,
+                    onDraft = { session.draft = it },
+                    messages = session.messages,
+                    status = session.status,
+                    pending = session.pendingText != null,
                     send = { sendMessage() },
                     discover = { withBluetoothPermissions { bluetooth.startAdvertising() } }
                 )
@@ -106,19 +83,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendMessage() {
-        val message = draft
-        if (message.toByteArray(Charsets.UTF_8).size !in 1..20) {
-            status = "Messages must be between 1 and 20 UTF-8 bytes"
-            return
-        }
-        if (pendingText != null) {
-            status = "Still sending. Please wait."
-            return
-        }
         withBluetoothPermissions {
-            pendingText = message
-            status = "Looking for a nearby phone..."
-            bluetooth.send(message)
+            session.beginSend()?.let(bluetooth::send)
         }
     }
 
@@ -143,12 +109,13 @@ class MainActivity : ComponentActivity() {
             permissionAction = null
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED })
                 action?.invoke()
-            else status = "Bluetooth permission is needed"
+            else session.status = "Bluetooth permission is needed. Allow the requested permissions and try again."
         }
     }
 
     override fun onStop() {
         bluetooth.stop()
+        session.onStopped()
         super.onStop()
     }
 }
@@ -159,12 +126,26 @@ private fun YapApp(
     messages: List<ChatMessage>, status: String, pending: Boolean,
     send: () -> Unit, discover: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding()) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(screen) {
+        focusManager.clearFocus()
+        keyboard?.hide()
+    }
+    BackHandler(enabled = screen != "chats") {
+        navigate(if (screen == "controls") "conversation" else "chats")
+    }
+    Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().imePadding()) {
         when (screen) {
             "conversation" -> {
                 ConversationHeader(onBack = { navigate("chats") }, onControls = { navigate("controls") })
                 HorizontalDivider(color = Surface2, thickness = 1.dp)
+                val listState = rememberLazyListState()
+                LaunchedEffect(messages.size) {
+                    if (messages.isNotEmpty()) listState.scrollToItem(messages.size + 1)
+                }
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(13.dp)
@@ -172,7 +153,7 @@ private fun YapApp(
                     item { SafetyNote() }
                     if (messages.isEmpty()) item { EmptyConversation() }
                     itemsIndexed(messages) { _, message -> MessageBubble(message) }
-                    item { Text(status, color = Soft, fontSize = 11.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                    item { Text(status, color = Soft, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(top = 14.dp).semantics { liveRegion = LiveRegionMode.Polite }, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
                 }
                 Composer(draft, onDraft, pending, send)
             }
@@ -201,7 +182,7 @@ private fun Wordmark() {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Lime, letterSpacing = 2.sp)
+    Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Lime, letterSpacing = 2.sp)
 }
 
 @Composable
@@ -211,13 +192,12 @@ private fun Avatar(size: Int = 54) {
         contentAlignment = Alignment.Center
     ) {
         Text("Y", fontSize = (size / 2).sp, fontWeight = FontWeight.Black, color = White)
-        Box(Modifier.size(10.dp).align(Alignment.BottomEnd).background(Lime, CircleShape).border(2.dp, Ink, CircleShape))
     }
 }
 
 @Composable
 private fun ChatsScreen(messages: List<ChatMessage>, open: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = YapSpacing.gutter)) {
         Spacer(Modifier.height(22.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Wordmark()
@@ -228,15 +208,16 @@ private fun ChatsScreen(messages: List<ChatMessage>, open: () -> Unit) {
         }
         Text("YOUR SPACE. YOUR VOICE.", fontSize = 11.sp, color = Soft, letterSpacing = 2.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(34.dp))
-        Text("Messages", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = White)
+        Text("Messages", style = MaterialTheme.typography.headlineLarge, color = White)
         Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            FilterChip("All", true)
-            FilterChip("Groups", false)
-            FilterChip("Unread", false)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = true, onClick = {}, label = { Text("All") },
+                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Lime, selectedLabelColor = Ink),
+                modifier = Modifier.heightIn(min = YapSpacing.touchTarget))
+            AssistChip(onClick = {}, enabled = false, label = { Text("Groups · coming later") }, modifier = Modifier.heightIn(min = YapSpacing.touchTarget))
         }
         Spacer(Modifier.height(29.dp))
-        SectionTitle("RECENT CHATS")
+        SectionTitle(if (messages.isEmpty()) "START HERE" else "THIS SESSION")
         Spacer(Modifier.height(12.dp))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable(onClick = open)
@@ -246,12 +227,12 @@ private fun ChatsScreen(messages: List<ChatMessage>, open: () -> Unit) {
             Avatar()
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("Nearby Yap phone", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = White)
+                Text("Bluetooth test chat", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = White)
                 Spacer(Modifier.height(5.dp))
                 Text(messages.lastOrNull()?.body ?: "Start a conversation", fontSize = 14.sp,
                     color = Soft, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(7.dp))
-                Text("●  Unverified Bluetooth peer", fontSize = 11.sp, color = Lime)
+                Text("Finds a phone when you send", fontSize = 12.sp, color = Soft)
             }
             Icon(Icons.Default.ChevronRight, null, tint = Soft)
         }
@@ -267,20 +248,7 @@ private fun ChatsScreen(messages: List<ChatMessage>, open: () -> Unit) {
                     color = Soft, fontSize = 13.sp, lineHeight = 19.sp)
             }
         }
-    }
-}
-
-@Composable
-private fun FilterChip(text: String, selected: Boolean) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    Box(
-        Modifier.clip(RoundedCornerShape(50)).background(if (selected) Lime else Surface)
-            .clickable {
-                if (!selected) android.widget.Toast.makeText(context, "Coming soon", android.widget.Toast.LENGTH_SHORT).show()
-            }.padding(horizontal = 19.dp, vertical = 11.dp)
-    ) {
-        Text(text, fontSize = 13.sp, color = if (selected) Ink else Soft,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -296,7 +264,7 @@ private fun ConversationHeader(onBack: () -> Unit, onControls: () -> Unit) {
         Avatar(44)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Nearby Yap phone", color = White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            Text("Bluetooth test chat", color = White, style = MaterialTheme.typography.titleMedium)
             Text("Unverified · Direct Bluetooth", color = Soft, fontSize = 11.sp)
         }
         IconButton(onClick = onControls, modifier = Modifier.size(48.dp)) {
@@ -315,13 +283,13 @@ private fun SafetyNote() {
         Icon(Icons.Default.Info, null, tint = Coral, modifier = Modifier.size(17.dp))
         Spacer(Modifier.width(9.dp))
         Text("Test chat · Not encrypted · Don't share private information",
-            color = Soft, fontSize = 11.sp, lineHeight = 16.sp)
+            color = Soft, fontSize = 12.sp, lineHeight = 18.sp)
     }
 }
 
 @Composable
 private fun EmptyConversation() {
-    Column(Modifier.fillMaxWidth().padding(top = 110.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.fillMaxWidth().padding(top = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Icons.Default.Forum, null, tint = Lime, modifier = Modifier.size(45.dp))
         Spacer(Modifier.height(18.dp))
         Text("Say something.", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = White)
@@ -349,43 +317,45 @@ private fun MessageBubble(message: ChatMessage) {
             Text(message.body, color = if (message.mine) Ink else White, fontSize = 16.sp, lineHeight = 22.sp)
         }
         if (message.state.isNotEmpty()) {
-            Text(message.state, fontSize = 10.sp, color = Soft, modifier = Modifier.padding(top = 5.dp, end = 3.dp))
+            Text(message.state, style = MaterialTheme.typography.labelMedium, color = Soft, modifier = Modifier.padding(top = 5.dp, end = 3.dp))
         }
     }
 }
 
 @Composable
 private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean, send: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(Ink).padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            Modifier.weight(1f).heightIn(min = 52.dp).background(Surface, RoundedCornerShape(27.dp))
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.weight(1f)) {
-                if (draft.isEmpty()) Text("Write a message...", color = Soft, fontSize = 15.sp)
-                BasicTextField(
-                    value = draft, onValueChange = onDraft, textStyle = androidx.compose.ui.text.TextStyle(
-                        color = White, fontSize = 16.sp
-                    ), cursorBrush = androidx.compose.ui.graphics.SolidColor(Lime),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
-                    modifier = Modifier.fillMaxWidth()
-                )
+    val bytes = draft.toByteArray(Charsets.UTF_8).size
+    val canSend = bytes in 1..20 && !pending
+    Column(Modifier.fillMaxWidth().background(Ink).padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(YapSpacing.gap)) {
+            OutlinedTextField(
+                value = draft, onValueChange = onDraft,
+                label = { Text("Message") },
+                placeholder = { Text("Write a message…") },
+                singleLine = true, isError = bytes > 20,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
+                shape = RoundedCornerShape(26.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Lime, unfocusedBorderColor = Soft,
+                    focusedContainerColor = Surface, unfocusedContainerColor = Surface,
+                    errorContainerColor = Surface, cursorColor = Lime
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            FilledIconButton(onClick = send, enabled = canSend, modifier = Modifier.size(52.dp)) {
+                Icon(Icons.AutoMirrored.Filled.Send, "Send", modifier = Modifier.size(23.dp))
             }
         }
-        Spacer(Modifier.width(10.dp))
-        Box(
-            Modifier.size(52.dp).background(if (pending) Soft else Lime, CircleShape)
-                .clickable(enabled = !pending, onClick = send),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = Ink, modifier = Modifier.size(23.dp))
-        }
+        Text(
+            when {
+                pending -> "Sending… Keep Yap open."
+                bytes > 20 -> "$bytes / 20 UTF-8 bytes · Shorten your message"
+                else -> "$bytes / 20 UTF-8 bytes"
+            },
+            color = if (bytes > 20) Coral else Soft, fontSize = 12.sp,
+            modifier = Modifier.padding(start = 16.dp, top = 6.dp)
+        )
     }
 }
 
@@ -404,12 +374,13 @@ private fun BottomBar(screen: String, navigate: (String) -> Unit) {
             Column(
                 Modifier.weight(1f).clip(RoundedCornerShape(18.dp))
                     .background(if (selected) Lime else Color.Transparent)
-                    .clickable { navigate(key) }.padding(vertical = 10.dp),
+                    .heightIn(min = YapSpacing.touchTarget)
+                    .selectable(selected = selected, role = Role.Tab, onClick = { navigate(key) }).padding(vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(icon, title, tint = if (selected) Ink else Soft, modifier = Modifier.size(21.dp))
+                Icon(icon, null, tint = if (selected) Ink else Soft, modifier = Modifier.size(21.dp))
                 Spacer(Modifier.height(3.dp))
-                Text(title, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     color = if (selected) Ink else Soft)
             }
         }
@@ -418,11 +389,11 @@ private fun BottomBar(screen: String, navigate: (String) -> Unit) {
 
 @Composable
 private fun NetworkScreen(status: String, discover: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = YapSpacing.gutter)) {
         Spacer(Modifier.height(25.dp))
         SectionTitle("THE LIVING NETWORK")
         Spacer(Modifier.height(9.dp))
-        Text("Your network.", fontSize = 33.sp, fontWeight = FontWeight.Bold, color = White)
+        Text("Your network.", style = MaterialTheme.typography.headlineLarge, color = White)
         Text("No towers. No gatekeepers.", fontSize = 14.sp, color = Soft)
         Spacer(Modifier.height(28.dp))
         Box(
@@ -432,22 +403,12 @@ private fun NetworkScreen(status: String, discover: () -> Unit) {
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 val center = Offset(size.width * .5f, size.height * .52f)
-                val points = listOf(
-                    Offset(size.width * .20f, size.height * .24f),
-                    Offset(size.width * .78f, size.height * .22f),
-                    Offset(size.width * .84f, size.height * .72f),
-                    Offset(size.width * .19f, size.height * .78f)
-                )
-                points.forEach { point ->
-                    drawLine(Blue.copy(alpha = .30f), center, point, strokeWidth = 2.dp.toPx())
-                    drawCircle(Blue.copy(alpha = .25f), radius = 15.dp.toPx(), center = point)
-                    drawCircle(Blue, radius = 5.dp.toPx(), center = point)
-                }
+                drawCircle(Blue.copy(alpha = .35f), radius = 100.dp.toPx(), center = center, style = Stroke(1.dp.toPx()))
                 drawCircle(Lime.copy(alpha = .12f), radius = 62.dp.toPx(), center = center)
                 drawCircle(Lime.copy(alpha = .22f), radius = 40.dp.toPx(), center = center, style = Stroke(1.dp.toPx()))
                 drawCircle(Lime, radius = 13.dp.toPx(), center = center)
             }
-            Text("ILLUSTRATION · NOT LIVE PEERS", fontSize = 9.sp, color = Soft,
+            Text("THIS PHONE · NO LIVE PEER MAP", fontSize = 12.sp, color = Soft,
                 letterSpacing = 1.sp, modifier = Modifier.align(Alignment.BottomCenter))
         }
         Spacer(Modifier.height(22.dp))
@@ -455,25 +416,22 @@ private fun NetworkScreen(status: String, discover: () -> Unit) {
         Spacer(Modifier.height(9.dp))
         Text(status, color = White, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
-        Box(
-            Modifier.fillMaxWidth().background(Lime, RoundedCornerShape(18.dp))
-                .clickable(onClick = discover).padding(17.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("MAKE THIS PHONE DISCOVERABLE", color = Ink, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Button(onClick = discover, modifier = Modifier.fillMaxWidth().heightIn(min = YapSpacing.touchTarget), shape = RoundedCornerShape(18.dp)) {
+            Text("Make this phone discoverable", fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(18.dp))
-        Text("The network map is a design preview. Real peer discovery and relays will appear here as we build them.",
+        Text("Yap looks for a phone when you send. A live peer map and relay routes are not available yet.",
             fontSize = 13.sp, lineHeight = 19.sp, color = Soft)
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 private fun SettingsScreen() {
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(YapSpacing.gutter)) {
         SectionTitle("YOUR YAP")
         Spacer(Modifier.height(12.dp))
-        Text("Settings.", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = White)
+        Text("Settings.", style = MaterialTheme.typography.headlineLarge, color = White)
         Spacer(Modifier.height(28.dp))
         SettingsTile("Privacy first", "Encryption and verified identities are not available in this prototype.", Icons.Default.Shield)
         Spacer(Modifier.height(12.dp))
@@ -501,18 +459,17 @@ private fun SettingsTile(title: String, subtitle: String, icon: androidx.compose
 
 @Composable
 private fun ControlsScreen(status: String, discover: () -> Unit, back: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(YapSpacing.gutter)) {
         IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Lime) }
         Spacer(Modifier.height(20.dp))
         SectionTitle("BLUETOOTH TEST")
         Spacer(Modifier.height(10.dp))
-        Text("Connection controls.", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = White)
+        Text("Connection controls.", style = MaterialTheme.typography.headlineLarge, color = White)
         Spacer(Modifier.height(20.dp))
         Text(status, fontSize = 15.sp, color = Soft)
         Spacer(Modifier.height(24.dp))
-        Box(Modifier.fillMaxWidth().background(Lime, RoundedCornerShape(18.dp))
-            .clickable(onClick = discover).padding(18.dp), contentAlignment = Alignment.Center) {
-            Text("MAKE THIS PHONE DISCOVERABLE", color = Ink, fontWeight = FontWeight.Bold)
+        Button(onClick = discover, modifier = Modifier.fillMaxWidth().heightIn(min = YapSpacing.touchTarget), shape = RoundedCornerShape(18.dp)) {
+            Text("Make this phone discoverable", fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(22.dp))
         Text("Keep Yap open on both phones. Messages are limited to 20 bytes and are not encrypted or saved.",

@@ -3,6 +3,7 @@
 **/target/
 # Android
 .gradle/
+.kotlin/
 **/build/
 local.properties
 *.apk
