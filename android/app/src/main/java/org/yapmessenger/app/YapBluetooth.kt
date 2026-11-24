@@ -16,7 +16,7 @@ import java.util.UUID
  */
 @SuppressLint("MissingPermission") // Permissions are checked by MainActivity before calling.
 class YapBluetooth(
-    context: Context,
+    private val context: Context,
     private val report: (String) -> Unit
 ) {
     companion object {
