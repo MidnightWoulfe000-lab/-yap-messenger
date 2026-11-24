@@ -11,7 +11,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -152,7 +152,19 @@ private fun NetworkVisualisation(preview: Boolean, peer: PeerObservation, reduce
             fun link(a: Int, b: Int, internet: Boolean = false) {
                 connectionLine(if (internet) Blue else Lime, point(a), point(b), internet)
             }
-            if (preview) { link(0, 1); link(1, 2); link(0, 3, true) }
+            if (preview) {
+                link(0, 1)
+                // Route the relay around the labels instead of drawing through them.
+                val from = point(1) + Offset(22.dp.toPx(), 0f)
+                val to = point(2) + Offset(22.dp.toPx(), 0f)
+                val relay = Path().apply {
+                    moveTo(from.x, from.y)
+                    cubicTo(size.width * 1.03f, from.y + size.height * .12f,
+                        size.width * 1.03f, to.y - size.height * .12f, to.x, to.y)
+                }
+                drawPath(relay, Lime, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+                link(0, 3, true)
+            }
             else if (peer == PeerObservation.CONNECTED) link(0, 1)
             nodes.forEach { node ->
                 val center = Offset(size.width * node.x, size.height * node.y)
