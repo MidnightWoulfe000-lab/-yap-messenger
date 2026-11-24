@@ -10,6 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.WindowInsets
+import android.text.TextWatcher
+import android.text.Editable
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -33,6 +36,7 @@ class MainActivity : Activity() {
     private var pendingAction: (() -> Unit)? = null
     private var currentScreen = "chats"
     private var inputDraft = ""
+    private var composerField: EditText? = null
     private val messages = mutableListOf<Pair<Boolean, String>>()
     private var lastOutgoing: String? = null
 
@@ -41,6 +45,7 @@ class MainActivity : Activity() {
         window.statusBarColor = ink
         window.navigationBarColor = ink
         window.decorView.systemUiVisibility = 0
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         bluetooth = YapBluetooth(this) { update ->
             runOnUiThread {
                 statusMessage = update
@@ -54,7 +59,9 @@ class MainActivity : Activity() {
                 if (currentScreen == "conversation" || currentScreen == "network" || currentScreen == "chats") {
                     if (currentScreen == "conversation") {
                         if (update.startsWith("Message received: ") ||
-                            update == "Message delivered to the other phone.") render()
+                            update == "Message delivered to the other phone.") {
+                            if (composerField?.hasFocus() != true) render()
+                        }
                     } else render()
                 }
             }
@@ -122,8 +129,22 @@ class MainActivity : Activity() {
             scroll.addView(body)
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             root.addView(navigation())
+            composerField = null
+        }
+        // Edge-to-edge Android versions may draw our header under the status bar
+        // and our composer under the keyboard. Respect the real window insets.
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            if (Build.VERSION.SDK_INT >= 30) {
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                val keyboard = insets.getInsets(WindowInsets.Type.ime())
+                view.setPadding(0, bars.top, 0, maxOf(bars.bottom, keyboard.bottom))
+            } else {
+                view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
+            }
+            insets
         }
         setContentView(root)
+        root.requestApplyInsets()
     }
 
     private fun avatar(symbol: String, colour: Int, size: Int = 52): TextView =
@@ -267,6 +288,14 @@ class MainActivity : Activity() {
             setText(inputDraft)
             setSelection(text.length)
         }
+        field.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                inputDraft = s?.toString() ?: ""
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        composerField = field
         line.addView(field, LinearLayout.LayoutParams(0, dp(52), 1f))
         val send = label("➤", 23f, ink, true).apply {
             gravity = Gravity.CENTER
