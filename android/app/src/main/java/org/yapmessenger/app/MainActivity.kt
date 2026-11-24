@@ -55,6 +55,10 @@ class MainActivity : Activity() {
                 }
                 if (update == "Message delivered to the other phone.") {
                     lastOutgoing?.let { messages.add(true to it) }
+                    if (composerField?.text?.toString() == lastOutgoing) composerField?.setText("")
+                    lastOutgoing = null
+                }
+                if (update.contains("failed", ignoreCase = true) || update.contains("timed out", ignoreCase = true) || update.startsWith("No nearby")) {
                     lastOutgoing = null
                 }
                 if (currentScreen == "conversation") {
@@ -169,7 +173,9 @@ class MainActivity : Activity() {
             setOnClickListener { currentScreen = "conversation"; render() }
         })
         body.addView(heading)
-        body.addView(space(22))
+        body.addView(space(8))
+        body.addView(label("YOUR CONVERSATIONS", 11f, lime, true))
+        body.addView(space(18))
         val tabs = row()
         listOf("All", "Groups", "Unread").forEachIndexed { index, title ->
             val active = index == 0
@@ -187,7 +193,9 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, dp(44), 1f))
         }
         body.addView(tabs)
-        body.addView(space(23))
+        body.addView(space(20))
+        body.addView(label("RECENT", 12f, muted, true))
+        body.addView(space(8))
         val chat = row().apply {
             minimumHeight = dp(88)
             isClickable = true
@@ -209,7 +217,7 @@ class MainActivity : Activity() {
             setBackgroundColor(surface)
             layoutParams = LinearLayout.LayoutParams(-1, dp(1))
         })
-        body.addView(space(32))
+        body.addView(space(24))
         body.addView(label("JUST GETTING STARTED", 12f, lime, true))
         body.addView(space(10))
         body.addView(label(
@@ -219,7 +227,7 @@ class MainActivity : Activity() {
     }
 
     private fun conversationHeader(): View {
-        val header = row().apply { pad(this, 16, 12, 16, 14) }
+        val header = row().apply { pad(this, 16, 6, 16, 8) }
         header.addView(label("‹", 38f, lime).apply {
             gravity = Gravity.CENTER
             minWidth = dp(48)
@@ -249,7 +257,7 @@ class MainActivity : Activity() {
             background = rounded(surface, 15)
             pad(this, 14, 11, 14, 11)
         })
-        body.addView(space(22))
+        body.addView(space(18))
         if (messages.isEmpty()) {
             body.addView(space(60))
             body.addView(label("Say something.", 26f, Color.WHITE, true).apply {
@@ -274,15 +282,15 @@ class MainActivity : Activity() {
                 body.addView(space(13))
             }
         }
-        body.addView(space(20))
-        body.addView(label(statusMessage, 12f, muted).apply { gravity = Gravity.CENTER })
+        body.addView(space(14))
+        body.addView(label(statusMessage, 11f, muted).apply { gravity = Gravity.CENTER })
     }
 
     private fun composer(): View {
         val outer = column().apply { pad(this, 14, 8, 14, 16) }
         val line = row()
         val field = EditText(this).apply {
-            hint = "Message (20 bytes)"
+            hint = "Message"
             setHintTextColor(muted)
             setTextColor(Color.WHITE)
             textSize = 16f
@@ -313,6 +321,8 @@ class MainActivity : Activity() {
                     android.widget.Toast.makeText(
                         this@MainActivity, "Use 1 to 20 UTF-8 bytes", android.widget.Toast.LENGTH_SHORT
                     ).show()
+                } else if (lastOutgoing != null) {
+                    android.widget.Toast.makeText(this@MainActivity, "Still sending. Please wait.", android.widget.Toast.LENGTH_SHORT).show()
                 } else {
                     withBluetoothPermissions {
                         lastOutgoing = message
@@ -325,7 +335,7 @@ class MainActivity : Activity() {
         line.addView(send, sendParams)
         outer.addView(line)
         outer.addView(space(7))
-        outer.addView(label("Bluetooth test · Tap ⋮ to make this phone discoverable", 11f, muted))
+        outer.addView(label("Nearby Bluetooth · 20-byte limit · Controls in ⋮", 11f, muted))
         return outer
     }
 
