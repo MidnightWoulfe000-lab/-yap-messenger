@@ -33,7 +33,8 @@ class YapBluetooth(
     private var scanner: BluetoothLeScanner? = null
     private var scanning = false
     private var advertising = false
-    private var greetingReceived = false
+    private var messageDelivered = false
+    private var outgoing: ByteArray? = null
     private var advertiseRequested = false
     private val seen = mutableSetOf<String>()
 
@@ -42,6 +43,22 @@ class YapBluetooth(
             if (status == BluetoothGatt.GATT_SUCCESS && service.uuid == SERVICE_ID) {
                 main.post { beginAdvertising() }
             } else main.post { report("Bluetooth service registration failed (status $status).") }
+        }
+
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice, requestId: Int,
+            characteristic: BluetoothGattCharacteristic, preparedWrite: Boolean,
+            responseNeeded: Boolean, offset: Int, value: ByteArray
+        ) {
+            val valid = characteristic.uuid == GREETING_ID &&
+                !preparedWrite && offset == 0 && value.isNotEmpty() &&
+                value.size <= 20 && value.toString(Charsets.UTF_8).toByteArray(Charsets.UTF_8).contentEquals(value)
+            if (responseNeeded) server?.sendResponse(
+                device, requestId,
+                if (valid) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
+                offset, null
+            )
+            if (valid) main.post { report("Message received: " + value.toString(Charsets.UTF_8)) }
         }
 
         override fun onCharacteristicReadRequest(
@@ -71,48 +88,51 @@ class YapBluetooth(
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                greetingReceived = false
-                main.post { report("Connected to a nearby Yap device. Reading test greeting...") }
+                messageDelivered = false
+                main.post { report("Connected. Sending message...") }
                 if (!gatt.discoverServices()) {
                     main.post { report("Couldn't discover the Yap service.") }
                     gatt.close()
                 }
             } else {
-                main.post { if (!greetingReceived) report("Disconnected before receiving greeting (status $status).") }
+                main.post { if (!messageDelivered) report("Disconnected before send was confirmed (status $status).") }
                 gatt.close()
                 if (client === gatt) client = null
             }
         }
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             val characteristic = gatt.getService(SERVICE_ID)?.getCharacteristic(GREETING_ID)
-            if (status != BluetoothGatt.GATT_SUCCESS || characteristic == null || !gatt.readCharacteristic(characteristic)) {
-                main.post { report("Couldn't read the Yap test greeting.") }
+            val bytes = outgoing
+            if (status != BluetoothGatt.GATT_SUCCESS || characteristic == null || bytes == null) {
+                main.post { report("Could not find Yap's message service.") }
+                gatt.disconnect()
+                return
+            }
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            val started = if (android.os.Build.VERSION.SDK_INT >= 33) {
+                gatt.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                    BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.value = bytes
+                gatt.writeCharacteristic(characteristic)
+            }
+            if (!started) {
+                main.post { report("Could not start Bluetooth message transfer.") }
                 gatt.disconnect()
             }
         }
-        @Deprecated("Required for Android versions below 13")
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic,
-            status: Int
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int
         ) {
-            if (android.os.Build.VERSION.SDK_INT < 33) showGreeting(gatt, status, characteristic.value)
+            if (characteristic.uuid != GREETING_ID) return
+            messageDelivered = status == BluetoothGatt.GATT_SUCCESS
+            main.post {
+                report(if (messageDelivered) "Message delivered to the other phone."
+                else "Message transfer failed (status $status).")
+            }
+            gatt.disconnect()
         }
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic,
-            value: ByteArray, status: Int
-        ) {
-            showGreeting(gatt, status, value)
-        }
-    }
-
-    private fun showGreeting(gatt: BluetoothGatt, status: Int, value: ByteArray) {
-        if (status == BluetoothGatt.GATT_SUCCESS) greetingReceived = true
-        main.post {
-            report(if (status == BluetoothGatt.GATT_SUCCESS) {
-                "Received over Bluetooth: ${value.toString(Charsets.UTF_8)}"
-            } else "Couldn't read greeting (status $status).")
-        }
-        gatt.disconnect()
     }
 
     private val scanCallback = object : ScanCallback() {
@@ -142,16 +162,16 @@ class YapBluetooth(
             ?: run { report("Couldn't start the Yap Bluetooth service."); return }
         val service = BluetoothGattService(SERVICE_ID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         service.addCharacteristic(BluetoothGattCharacteristic(
-            GREETING_ID, BluetoothGattCharacteristic.PROPERTY_READ,
-            BluetoothGattCharacteristic.PERMISSION_READ
+            GREETING_ID, BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE
         ))
+        server = gattServer
+        advertiser = bleAdvertiser
         if (!gattServer.addService(service)) {
             gattServer.close()
             report("Couldn't register the Yap Bluetooth service.")
             return
         }
-        server = gattServer
-        advertiser = bleAdvertiser
         report("Registering Yap's Bluetooth service...")
     }
 
@@ -168,7 +188,21 @@ class YapBluetooth(
         report("Starting Yap discovery service...")
     }
 
-    fun scan() {
+    fun send(message: String) {
+        val bytes = message.toByteArray(Charsets.UTF_8)
+        if (bytes.isEmpty() || bytes.size > 20) {
+            report("For now, messages must be 1 to 20 bytes long.")
+            return
+        }
+        if (client != null || scanning) {
+            report("Already looking for a phone. Please wait.")
+            return
+        }
+        outgoing = bytes
+        scan()
+    }
+
+    private fun scan() {
         val bluetooth = adapter ?: run { report("Bluetooth isn't supported."); return }
         if (!bluetooth.isEnabled) { report("Please turn on Bluetooth."); return }
         if (scanning) return
@@ -198,6 +232,7 @@ class YapBluetooth(
         client?.disconnect()
         client?.close()
         client = null
+        outgoing = null
         server?.close()
         server = null
     }
