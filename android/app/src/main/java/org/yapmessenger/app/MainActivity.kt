@@ -358,7 +358,7 @@ class MainActivity : Activity() {
         listOf("chats" to "▣\\nChats", "network" to "♧\\nNetwork", "settings" to "⚙\\nSettings")
             .forEach { (screen, title) ->
                 val selected = currentScreen == screen
-                val tab = label(title.replace("\\n", "\n"), 13f, if (selected) ink else Color.WHITE, selected).apply {
+                val tab = label(title.replace("\\n", " "), 13f, if (selected) ink else Color.WHITE, selected).apply {
                     gravity = Gravity.CENTER
                     minHeight = dp(52)
                     if (selected) background = rounded(lime, 15)
