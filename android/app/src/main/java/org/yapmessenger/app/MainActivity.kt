@@ -51,7 +51,7 @@ class MainActivity : Activity() {
                     lastOutgoing?.let { messages.add(true to it) }
                     lastOutgoing = null
                 }
-                if (currentScreen == "conversation" || currentScreen == "network") render()
+                if (currentScreen == "conversation" || currentScreen == "network" || currentScreen == "chats") {\n                    if (currentScreen == "conversation") {\n                        // Keep the keyboard and draft intact while typing.\n                        if (update.startsWith("Message received: ") || update == "Message delivered to the other phone.") render()\n                    } else render()\n                }
             }
         }
         render()
@@ -92,153 +92,217 @@ class MainActivity : Activity() {
 
     private fun render() {
         root = column().apply { setBackgroundColor(ink) }
-        val content = ScrollView(this).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
+        if (currentScreen == "conversation") {
+            root.addView(conversationHeader())
+            val scroll = ScrollView(this).apply {
+                isFillViewport = true
+                isVerticalScrollBarEnabled = false
+            }
+            val messagesBody = column().apply { pad(this, 20, 18, 20, 18) }
+            conversationMessages(messagesBody)
+            scroll.addView(messagesBody)
+            root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            root.addView(composer())
+        } else {
+            val scroll = ScrollView(this).apply {
+                isFillViewport = true
+                isVerticalScrollBarEnabled = false
+            }
+            val body = column().apply { pad(this, 22, 20, 22, 20) }
+            when (currentScreen) {
+                "network" -> network(body)
+                "settings" -> settings(body)
+                else -> chats(body)
+            }
+            scroll.addView(body)
+            root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            root.addView(navigation())
         }
-        val body = column().apply { pad(this, 22, 24, 22, 16) }
-        when (currentScreen) {
-            "conversation" -> conversation(body)
-            "network" -> network(body)
-            "settings" -> settings(body)
-            else -> chats(body)
-        }
-        content.addView(body)
-        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
-        if (currentScreen != "conversation") root.addView(navigation())
         setContentView(root)
     }
 
+    private fun avatar(symbol: String, colour: Int, size: Int = 52): TextView =
+        label(symbol, 23f, if (colour == lime) ink else Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(colour, size / 2)
+            layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
+        }
+
     private fun chats(body: LinearLayout) {
         val heading = row()
-        heading.addView(label("yap", 40f, Color.WHITE, true))
+        heading.addView(label("yap", 42f, Color.WHITE, true))
         heading.addView(label(".", 42f, lime, true))
+        heading.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        heading.addView(label("＋", 30f, lime).apply {
+            minWidth = dp(48)
+            gravity = Gravity.RIGHT
+            setOnClickListener { currentScreen = "conversation"; render() }
+        })
         body.addView(heading)
-        body.addView(space(5))
-        body.addView(label("Nobody gets to silence you.", 14f, muted))
-        body.addView(space(30))
-        body.addView(label("CHATS", 12f, lime, true))
-        body.addView(space(13))
-
-        val chat = column().apply {
-            background = rounded(surface, 22)
-            pad(this, 18, 20, 18, 20)
+        body.addView(space(22))
+        val tabs = row()
+        listOf("All", "Groups", "Unread").forEachIndexed { index, title ->
+            val active = index == 0
+            tabs.addView(label(title, 14f, if (active) ink else muted, active).apply {
+                gravity = Gravity.CENTER
+                minHeight = dp(44)
+                if (active) background = rounded(lime, 24)
+                setOnClickListener {
+                    if (!active) {
+                        android.widget.Toast.makeText(
+                            this@MainActivity, "Coming soon", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        }
+        body.addView(tabs)
+        body.addView(space(23))
+        val chat = row().apply {
+            minHeight = dp(88)
             isClickable = true
             setOnClickListener { currentScreen = "conversation"; render() }
         }
-        chat.addView(label("●  Nearby Yap phone", 19f, Color.WHITE, true))
-        chat.addView(space(8))
-        chat.addView(label(
-            if (messages.isEmpty()) "Start a Bluetooth conversation" else messages.last().second,
+        chat.addView(avatar("Y", cobalt))
+        val details = column().apply { pad(this, 15, 5, 0, 5) }
+        details.addView(label("Nearby Yap phone", 18f, Color.WHITE, true))
+        details.addView(space(5))
+        details.addView(label(
+            if (messages.isEmpty()) "Tap to start a conversation" else messages.last().second,
             14f, muted
-        ))
-        chat.addView(space(10))
-        chat.addView(label("Experimental · No verified identity", 12f, lime))
+        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        details.addView(space(5))
+        details.addView(label("Unverified · Bluetooth test", 12f, lime))
+        chat.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(chat)
-        body.addView(space(22))
-        body.addView(label("EARLY ACCESS", 12f, muted, true))
+        body.addView(View(this).apply {
+            setBackgroundColor(surface)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(1))
+        })
+        body.addView(space(32))
+        body.addView(label("JUST GETTING STARTED", 12f, lime, true))
         body.addView(space(10))
         body.addView(label(
-            "We're building Yap in the open. Contacts, groups and saved chats are coming later. For now, messages travel directly between nearby phones.",
+            "Real contacts and groups are on the way. For now, Yap can exchange short messages directly with another nearby phone.",
             15f, muted
         ))
-        body.addView(space(20))
-        val open = action("OPEN BLUETOOTH CHAT", lime, ink) {
-            currentScreen = "conversation"; render()
-        }
-        body.addView(open)
     }
 
-    private fun conversation(body: LinearLayout) {
-        val top = row()
-        val back = label("‹", 36f, lime, true).apply {
+    private fun conversationHeader(): View {
+        val header = row().apply { pad(this, 16, 12, 16, 14) }
+        header.addView(label("‹", 38f, lime).apply {
+            gravity = Gravity.CENTER
             minWidth = dp(48)
-            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(48)
             setOnClickListener { currentScreen = "chats"; render() }
-        }
-        top.addView(back)
-        val identity = column()
-        identity.addView(label("Nearby Yap phone", 20f, Color.WHITE, true))
+        })
+        header.addView(avatar("Y", cobalt, 42))
+        val identity = column().apply { pad(this, 12, 0, 0, 0) }
+        identity.addView(label("Nearby Yap phone", 18f, Color.WHITE, true))
         identity.addView(label("Unverified Bluetooth peer", 12f, muted))
-        top.addView(identity)
-        body.addView(top)
-        body.addView(space(22))
-        body.addView(label("LOCAL BLUETOOTH TEST", 12f, lime, true))
-        body.addView(space(10))
-        val warning = label(
-            "Not encrypted. Anyone using this test should avoid sharing private information.",
-            13f, muted
-        ).apply { background = rounded(surface); pad(this, 15, 13, 15, 13) }
-        body.addView(warning)
-        body.addView(space(18))
+        header.addView(identity, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(label("⋮", 27f, Color.WHITE).apply {
+            gravity = Gravity.CENTER
+            minWidth = dp(48)
+            minHeight = dp(48)
+            setOnClickListener { showBluetoothControls() }
+        })
+        return header
+    }
 
+    private fun conversationMessages(body: LinearLayout) {
+        body.addView(label(
+            "Experimental chat · Not encrypted · Don't share private information",
+            12f, muted
+        ).apply {
+            gravity = Gravity.CENTER
+            background = rounded(surface, 15)
+            pad(this, 14, 11, 14, 11)
+        })
+        body.addView(space(22))
         if (messages.isEmpty()) {
-            body.addView(space(45))
-            body.addView(label("Your conversation starts here.", 24f, Color.WHITE, true))
-            body.addView(space(10))
+            body.addView(space(60))
+            body.addView(label("Say something.", 26f, Color.WHITE, true).apply {
+                gravity = Gravity.CENTER
+            })
+            body.addView(space(8))
             body.addView(label(
-                "Make one phone discoverable, then send a short message from the other.",
+                "Make one phone discoverable from the menu above, then send a message.",
                 15f, muted
-            ))
-            body.addView(space(35))
+            ).apply { gravity = Gravity.CENTER })
         } else {
             messages.forEach { (mine, text) ->
                 val wrapper = row().apply {
                     gravity = if (mine) Gravity.RIGHT else Gravity.LEFT
                 }
-                val bubble = label(text, 16f, if (mine) ink else Color.WHITE).apply {
-                    background = rounded(if (mine) lime else surface, 18)
-                    pad(this, 16, 13, 16, 13)
+                wrapper.addView(label(text, 16f, if (mine) ink else Color.WHITE).apply {
+                    background = rounded(if (mine) lime else surface, 19)
+                    pad(this, 17, 12, 17, 12)
                     maxWidth = (resources.displayMetrics.widthPixels * .76).toInt()
-                }
-                wrapper.addView(bubble)
+                })
                 body.addView(wrapper)
-                body.addView(space(10))
+                body.addView(space(13))
             }
-            body.addView(label("Messages are not saved after closing the app.", 12f, muted))
-            body.addView(space(20))
         }
+        body.addView(space(20))
+        body.addView(label(statusMessage, 12f, muted).apply { gravity = Gravity.CENTER })
+    }
 
-        body.addView(label("BLUETOOTH STATUS", 12f, lime, true))
-        body.addView(space(7))
-        body.addView(label(statusMessage, 14f, muted))
-        body.addView(space(15))
-        body.addView(action("MAKE THIS PHONE DISCOVERABLE", surface, Color.WHITE) {
-            withBluetoothPermissions { bluetooth.startAdvertising() }
-        })
-        body.addView(space(18))
+    private fun composer(): View {
+        val outer = column().apply { pad(this, 14, 8, 14, 16) }
+        val line = row()
         val field = EditText(this).apply {
-            hint = "Message (20 bytes max)"
+            hint = "Message (20 bytes)"
             setHintTextColor(muted)
             setTextColor(Color.WHITE)
             textSize = 16f
             setSingleLine(true)
-            background = rounded(surface)
-            pad(this, 16, 12, 16, 12)
+            background = rounded(surface, 24)
+            pad(this, 18, 13, 18, 13)
             setText(inputDraft)
             setSelection(text.length)
         }
-        body.addView(field)
-        body.addView(space(10))
-        body.addView(action("SEND TO NEARBY PHONE  ➜", lime, ink) {
-            val message = field.text.toString()
-            inputDraft = message
-            if (message.toByteArray(Charsets.UTF_8).size !in 1..20) {
-                statusMessage = "Messages must be between 1 and 20 UTF-8 bytes."
-                render()
-            } else {
-                withBluetoothPermissions {
-                    lastOutgoing = message
-                    bluetooth.send(message)
+        line.addView(field, LinearLayout.LayoutParams(0, dp(52), 1f))
+        val send = label("➤", 23f, ink, true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(lime, 26)
+            minWidth = dp(52)
+            minHeight = dp(52)
+            setOnClickListener {
+                val message = field.text.toString()
+                inputDraft = message
+                if (message.toByteArray(Charsets.UTF_8).size !in 1..20) {
+                    android.widget.Toast.makeText(
+                        this@MainActivity, "Use 1 to 20 UTF-8 bytes", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    withBluetoothPermissions {
+                        lastOutgoing = message
+                        bluetooth.send(message)
+                    }
                 }
             }
-        })
-        body.addView(space(18))
-        body.addView(action("←  BACK TO CHATS", surface, Color.WHITE) {
-            inputDraft = field.text.toString()
-            currentScreen = "chats"; render()
-        })
+        }
+        val sendParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply { leftMargin = dp(9) }
+        line.addView(send, sendParams)
+        outer.addView(line)
+        outer.addView(space(7))
+        outer.addView(label("Bluetooth test · Tap ⋮ to make this phone discoverable", 11f, muted))
+        return outer
     }
+
+    private fun showBluetoothControls() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Bluetooth test")
+            .setMessage("Status: $statusMessage\n\nMessages are not encrypted or saved. Keep both phones in Yap while testing.")
+            .setPositiveButton("Make discoverable") { _, _ ->
+                withBluetoothPermissions { bluetooth.startAdvertising() }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    
 
     private fun network(body: LinearLayout) {
         body.addView(label("Network", 34f, Color.WHITE, true))
@@ -291,10 +355,10 @@ class MainActivity : Activity() {
             background = rounded(surface, 20)
             pad(this, 8, 7, 8, 7)
         }
-        listOf("chats" to "Chats", "network" to "Network", "settings" to "Settings")
+        listOf("chats" to "▣\\nChats", "network" to "♧\\nNetwork", "settings" to "⚙\\nSettings")
             .forEach { (screen, title) ->
                 val selected = currentScreen == screen
-                val tab = label(title, 14f, if (selected) ink else Color.WHITE, selected).apply {
+                val tab = label(title.replace("\\n", "\n"), 13f, if (selected) ink else Color.WHITE, selected).apply {
                     gravity = Gravity.CENTER
                     minHeight = dp(52)
                     if (selected) background = rounded(lime, 15)
