@@ -51,7 +51,12 @@ class MainActivity : Activity() {
                     lastOutgoing?.let { messages.add(true to it) }
                     lastOutgoing = null
                 }
-                if (currentScreen == "conversation" || currentScreen == "network" || currentScreen == "chats") {\n                    if (currentScreen == "conversation") {\n                        // Keep the keyboard and draft intact while typing.\n                        if (update.startsWith("Message received: ") || update == "Message delivered to the other phone.") render()\n                    } else render()\n                }
+                if (currentScreen == "conversation" || currentScreen == "network" || currentScreen == "chats") {
+                    if (currentScreen == "conversation") {
+                        if (update.startsWith("Message received: ") ||
+                            update == "Message delivered to the other phone.") render()
+                    } else render()
+                }
             }
         }
         render()
@@ -159,7 +164,7 @@ class MainActivity : Activity() {
         body.addView(tabs)
         body.addView(space(23))
         val chat = row().apply {
-            minHeight = dp(88)
+            minimumHeight = dp(88)
             isClickable = true
             setOnClickListener { currentScreen = "conversation"; render() }
         }
