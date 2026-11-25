@@ -1,13 +1,16 @@
 # Yap for Android
 
-The 0.2 debug build integrates experimental encrypted one-to-one conversations,
-verified pairing, Android Keystore-backed storage, durable ciphertext queues,
-foreground LE L2CAP mesh and an optional private TLS internet relay. The original
-unencrypted 20-byte Bluetooth test is retained separately.
+The dev build has encrypted one-to-one chats, in-person QR pairing, encrypted
+storage, and nearby messaging over Bluetooth and Wi-Fi (same network or hotspot)
+that keeps running in the background. Messages hop through other phones. Link IDs
+rotate so phones can't be tracked, and floods get slowed down. There's also an
+optional private internet relay. The old unencrypted 20-byte Bluetooth test is
+still there, kept separate.
 
-Read [the debug release guide](../docs/debug-release-0.2.md) for installation,
-pairing, relay configuration and current limitations. There is no independent
-security audit, background relaying, iOS support or group implementation.
+What's done and what's left is in the [main README](../README.md). How nearby
+messaging works is in [local mesh v2](../docs/proposals/local-mesh-v2.md).
+Install and pairing steps are in [the debug release guide](../docs/debug-release-0.2.md).
+No independent security audit, iOS support or group chats yet.
 
 ## Build
 
@@ -32,7 +35,9 @@ Use `./gradlew` on Linux/macOS. APK output is
 `app/build/outputs/apk/debug/app-debug.apk`. Pre-build checks reject missing native
 libraries. Native compilation uses locked dependencies and 16 KiB ELF alignment.
 
-Unit tests cover the legacy message state and bounded WebSocket parser. Android
+Unit tests cover the legacy message state, the bounded WebSocket parser, the
+nearby link layer (`MeshHubTest`: rotating IDs, HELLO contents, bad frames,
+duplicate links, Wi-Fi preference) and flood slow mode (`FloodGuardTest`). Android
 device tests cover native pairing, encrypted snapshot/restart, tamper and missing
 key rejection, uncertain disk commits, native relay restart and UI navigation.
 The optional `InternetIntegrationTest` needs the public localhost TLS fixture

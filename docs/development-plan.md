@@ -10,10 +10,15 @@ Keystore-backed snapshots, foreground L2CAP and a private internet relay client.
 
 The supplied 24 November [audit](protocol-audit-response.md) has informed the
 implementation and the [Android endpoint contract](android-endpoint-v1.md).
-Next are real-phone L2CAP/A–B–C tests, broader fault/fuzz testing and an independent
-security audit. Group governance requires the missing policy decisions before
-implementation. iOS distribution and background operation
-remain open. The [proposal](protocol-proposal.md) preserves the intended milestone;
+Since then (25 November 2026): Wi-Fi nearby messaging, rotating link IDs, no more
+broadcast pairing bundles, Android background running, a separate 10,000-message
+carrier store and flood slow mode. See [local mesh v2](proposals/local-mesh-v2.md)
+and the [main README](../README.md) for exactly what's done and what's left.
+
+Next are real-phone tests (Wi-Fi, hotspot, A–B–C, locked phones), limited-copy
+routing, rotating message address labels, broader fault/fuzz testing and an
+independent security audit. Group governance requires the missing policy decisions
+before implementation. iOS remains open. The [proposal](protocol-proposal.md) preserves the intended milestone;
 its unimplemented endpoint requirements are not established by prototype tests.
 
 ## Original roadmap
