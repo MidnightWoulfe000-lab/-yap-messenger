@@ -2,9 +2,9 @@
 
 Nobody gets to silence you.
 
-Yap is a free, open-source messenger that works with or without the internet. Phones talk to each other directly over Bluetooth and Wi-Fi, and pass messages along through other phones until they reach the right person. It's built for protests and shutdowns, so it has to be simple to use and it can't leave a trail.
+Yap is a free, open-source messenger that works with or without the internet. Phones talk to each other directly over Bluetooth and Wi-Fi, and pass messages along through other phones until they reach the right person. It's built for when the network isn't there or can't be trusted, so it has to be simple to use and it can't leave a trail.
 
-**This is the dev build. It is not safe for real protest use yet.** Nothing here has had an independent security audit and most of it hasn't been tested on real phones. Don't trust it with anything that could get someone hurt.
+**This is the dev build. It is not ready for real-world use yet.** Nothing here has had an independent security audit and most of it hasn't been tested on real phones. Don't trust it with anything that could get someone hurt.
 
 ## What works right now
 
@@ -47,7 +47,7 @@ Yap is a free, open-source messenger that works with or without the internet. Ph
 - Limited copies ("spray and wait"): right now a carrier phone hands a message on and deletes its copy. If it then meets the actual recipient first, it has nothing to give. The plan is to start each message with about 8 copies.
 - A crowd simulation to pick the right number of copies.
 - An "effort stamp" (proof of work) on each message so mass spam is slow and expensive to make.
-- Group chats. Protests need them, and they're the hardest part to get right.
+- Group chats. Big crowds need them, and they're the hardest part to get right.
 - Making the internet side work through Tor instead of our own server.
 - Fixing the open security findings, mainly: a wrong clock can lock you out, someone with deep access to the phone could roll back its data, and a contact could fill your message history and jam the chat. Full list in the [security audit](docs/audit/2026-11-25-security-audit.md).
 

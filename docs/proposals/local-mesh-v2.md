@@ -13,7 +13,7 @@ in `SecureModel.kt`.
    more range and speed than Bluetooth and works with no internet: phones on the
    same network, or joined to one phone's hotspot.
 2. The owner's rule, stated directly: **nothing a phone sends to strangers may be
-   permanent or easy to track.** Yap is meant for protesters. Audit findings 1 and 2
+   permanent or easy to track.** Audit findings 1 and 2
    (`docs/audit/2026-11-25-security-audit.md`) showed v1 broke this rule: Bluetooth
    handed the permanent routing token to anyone who connected, and every phone that
    opened the pairing screen sent its identity key to every nearby phone.
@@ -129,7 +129,7 @@ Owner priority: messaging must keep working with the phone locked in a pocket.
   **Pause** in the notification or in Connections.
 - Notifications are generic and hidden on the lock screen (`VISIBILITY_SECRET`):
   "Nearby messaging is on" and "New message". Never a name or text, because phones
-  are seen and seized. Turning on nearby messaging also asks for notification
+  can be seen by others. Turning on nearby messaging also asks for notification
   permission on Android 13+; refusing it does not stop messaging.
 - Android 14 requires a matching permission for `connectedDevice`;
   `CHANGE_NETWORK_STATE` (install-time) satisfies it even if Bluetooth is refused.

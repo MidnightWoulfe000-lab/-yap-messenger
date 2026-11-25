@@ -21,7 +21,7 @@ import android.os.PowerManager
  *
  * Android only allows this as a "foreground service" with a visible notification.
  * Both notifications are deliberately generic and hidden on the lock screen: they
- * never show a contact name or message text, because phones get seen and seized.
+ * never show a contact name or message text, because phones can be seen by others.
  *
  * A partial wake lock keeps the CPU awake so links, retries and the outbox keep
  * moving while the screen is off. This costs battery; "Pause" in the notification

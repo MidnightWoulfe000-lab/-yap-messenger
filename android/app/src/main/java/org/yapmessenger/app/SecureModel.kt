@@ -152,7 +152,7 @@ internal class SecureModel(private val application: Application) {
         val next = SecureSnapshot(view.getString("identity"), view.getString("route"), offer, contacts, history, view.getInt("queued"))
         publicState = next
         // A new incoming message while no Yap screen is open: show a generic alert.
-        // Never the sender or the text: phones get seen and seized.
+        // Never the sender or the text: phones can be seen by others.
         val unread = contacts.sumOf { it.unread }
         if (lastUnread >= 0 && unread > lastUnread && !foreground) MeshService.notifyNewMessage(application)
         lastUnread = unread
