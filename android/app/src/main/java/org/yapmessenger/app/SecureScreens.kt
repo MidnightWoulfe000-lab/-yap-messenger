@@ -1,6 +1,6 @@
 package org.yapmessenger.app
 
-import android.graphics.Bitmap
+import android.os.SystemClock
 import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,7 +14,22 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.hypot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -25,62 +40,138 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
+private const val CODE_LIFETIME_MS = 60_000L
+
 @Composable
-internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String) -> Unit, myName: String, back: () -> Unit) {
+internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String) -> Unit, startNearby: () -> Unit, myName: String, back: () -> Unit) {
     val offer = model.snapshot.offer
-    var manual by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
     var packageText by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    // Friends added during this visit, so the screen can show them progressing to "added".
+    val knownIds = remember { model.snapshot.contacts.map { it.id }.toSet() }
+    val added = model.snapshot.contacts.filter { it.id !in knownIds }
     LaunchedEffect(Unit) { model.ensureOffer() }
-    LaunchedEffect(model.scannedQr) { if (model.scannedQr.isNotEmpty()) { packageText = model.scannedQr; manual = true } }
+    // Scanning is the consent step: add straight away, no form. Both phones still confirm each other.
+    LaunchedEffect(model.scannedQr) {
+        val code = model.scannedQr
+        if (code.isNotEmpty()) {
+            model.scannedQr = ""
+            if (!model.meshEnabled) startNearby()
+            model.importPairing(code, "")
+        }
+    }
+    // The code changes every minute. A code a friend has already scanned (reserved) is left alone.
+    val reserved = offer?.reserved == true
+    val born = remember(offer?.qr) { SystemClock.elapsedRealtime() }
+    var remaining by remember(offer?.qr) { mutableLongStateOf(CODE_LIFETIME_MS) }
+    LaunchedEffect(offer?.qr, reserved) {
+        var asked = false
+        while (offer != null && !reserved) {
+            remaining = (CODE_LIFETIME_MS - (SystemClock.elapsedRealtime() - born)).coerceAtLeast(0)
+            if (remaining == 0L && !asked) { asked = true; model.rotateOffer() }
+            delay(250)
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         PageHeader("Add a friend", back)
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(if (myName.isNotBlank()) "Hi $myName, meet in person" else "Meet in person", color = White, style = MaterialTheme.typography.titleLarge)
-            Text("1. Show your code below.  2. Scan your friend's code.  3. Check the fingerprints match on both phones. A nearby phone is not trusted until you both confirm.", color = Soft)
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (myName.isNotBlank()) "Hi $myName, let your friend scan this" else "Let your friend scan this", color = White,
+                style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth())
             if (offer != null) {
                 PairingQr(offer.qr)
-                if (offer.reserved) Text("This code is reserved for a pending contact. Create a new code for someone else.", color = Soft, style = MaterialTheme.typography.bodySmall)
-                Button(onClick = scan, enabled = !model.locked, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Scan their code") }
-                OutlinedButton(onClick = { share(offer.pairingPackage) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Send my code another way") }
-            } else Text(if (model.locked) "Protected identity is locked" else "Create a fresh code to pair another contact.", color = Soft)
-            TextButton(onClick = model::makeOffer, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Create a new code") }
-            HorizontalDivider(color = Surface2)
-            Text("Your fingerprint", color = White, style = MaterialTheme.typography.titleMedium)
-            Text("Your friend should see the same one on their phone.", color = Soft, style = MaterialTheme.typography.bodySmall)
-            SelectionContainer { Text(model.snapshot.identity.chunked(8).joinToString(" "), color = Soft, style = MaterialTheme.typography.bodyMedium) }
-            TextButton(onClick = { manual = !manual }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (manual) "Hide other ways" else "Other ways to add a friend") }
-            if (manual) {
-                OutlinedTextField(name, { name = it.take(80) }, label = { Text("Contact name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(packageText, { packageText = it.take(8192) }, label = { Text("Their code or pairing package") }, maxLines = 5, modifier = Modifier.fillMaxWidth())
-                Text("Only confirm a code/package whose fingerprint you have checked with the other person. Sharing a package alone does not verify who sent it.", color = Soft, style = MaterialTheme.typography.bodySmall)
-                Button(onClick = { model.importPairing(packageText, name) }, enabled = packageText.isNotBlank() && !model.locked,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Confirm checked fingerprint") }
+                if (reserved) {
+                    Text("Someone has scanned this code. Finishing up…", color = Soft, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    LinearProgressIndicator(progress = { remaining / CODE_LIFETIME_MS.toFloat() }, color = Lime, trackColor = Surface2,
+                        modifier = Modifier.width(264.dp).height(4.dp).clip(RoundedCornerShape(2.dp)))
+                    Text("New code in ${(remaining + 999) / 1000}s", color = Soft, style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                Box(Modifier.size(264.dp), contentAlignment = Alignment.Center) {
+                    if (model.locked) Text("Protected identity is locked", color = Soft) else CircularProgressIndicator(color = Lime)
+                }
             }
-            model.snapshot.contacts.filter { !it.ready }.forEach { contact ->
-                HorizontalDivider(color = Surface2)
-                Text(contact.name, color = White, style = MaterialTheme.typography.titleMedium)
-                Text(contact.phase, color = Soft)
-                OutlinedButton(onClick = { share(contact.pairingPackage) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Share pairing reply") }
+            Button(onClick = scan, enabled = !model.locked && offer != null, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("Scan their code")
             }
-            InfoNote(model.status, accent = if (model.locked) Coral else Blue)
+            Text("Then both phones show matching fingerprints. Confirm they match and you are connected.", color = Soft,
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+            added.forEach { contact ->
+                Row(Modifier.fillMaxWidth().yapCard(14.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (contact.ready) Icon(Icons.Default.CheckCircle, null, tint = Lime) else CircularProgressIndicator(Modifier.size(24.dp), color = Lime, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (contact.ready) "${contact.name} added" else contact.name, color = White, style = MaterialTheme.typography.titleMedium)
+                        Text(if (contact.ready) "You can message them now." else contact.phase, color = Soft, style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (contact.ready) TextButton(onClick = back) { Text("Done") }
+                }
+            }
+            if (added.isEmpty()) InfoNote(model.status, accent = if (model.locked) Coral else Blue)
+            TextButton(onClick = { more = !more }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (more) "Hide other ways" else "Other ways to add a friend") }
+            if (more) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (offer != null) OutlinedButton(onClick = { share(offer.pairingPackage) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Send my code another way") }
+                    OutlinedTextField(name, { name = it.take(80) }, label = { Text("Name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(packageText, { packageText = it.take(8192) }, label = { Text("Their code or pairing package") }, maxLines = 5, modifier = Modifier.fillMaxWidth())
+                    Button(onClick = { model.importPairing(packageText, name); packageText = "" }, enabled = packageText.isNotBlank() && !model.locked,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Add friend") }
+                    Text("Only add a code from someone whose fingerprint you have checked in person. A shared code alone does not prove who sent it.", color = Soft, style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider(color = Surface2)
+                    Text("Your fingerprint", color = White, style = MaterialTheme.typography.titleMedium)
+                    SelectionContainer { Text(model.snapshot.identity.chunked(8).joinToString(" "), color = Soft, style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
 }
 
+/** Lime-on-black squiggle QR: soft modules, rounded finder eyes and a ring in the middle. Still a standard, scannable QR. */
 @Composable
 private fun PairingQr(value: String) {
-    val image = remember(value) {
-        val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 600, 600,
-            mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.Q, EncodeHintType.MARGIN to 4))
-        val pixels = IntArray(600 * 600) { index -> if (matrix[index % 600, index / 600]) android.graphics.Color.BLACK else android.graphics.Color.WHITE }
-        Bitmap.createBitmap(pixels, 600, 600, Bitmap.Config.ARGB_8888).asImageBitmap()
+    val grid = remember(value) {
+        val m = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1,
+            mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.Q, EncodeHintType.MARGIN to 0))
+        Array(m.height) { y -> BooleanArray(m.width) { x -> m[x, y] } }
     }
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Image(image, "Your Yap pairing code", Modifier.sizeIn(maxWidth = 248.dp, maxHeight = 248.dp).aspectRatio(1f).background(androidx.compose.ui.graphics.Color.White))
+    val ink = Lime
+    Crossfade(grid, animationSpec = tween(250), label = "code") { g ->
+        Canvas(Modifier.size(264.dp).clip(RoundedCornerShape(28.dp)).background(Ink)
+            .semantics { contentDescription = "Your Yap pairing code. It changes every minute." }) {
+            val n = g.size
+            val cell = size.width / (n + 4)
+            val o = cell * 2
+            val centre = n / 2f
+            val hole = 4.3f
+            fun eye(x: Int, y: Int) = (x < 7 && y < 7) || (x >= n - 7 && y < 7) || (x < 7 && y >= n - 7)
+            fun dark(x: Int, y: Int) = x in 0 until n && y in 0 until n && g[y][x] && !eye(x, y) &&
+                hypot(x + .5f - centre, y + .5f - centre) > hole
+            // Squiggles: neighbouring modules join into rounded strokes; a lone module is a dot.
+            val pen = cell * .86f
+            fun at(x: Int, y: Int) = Offset(o + (x + .5f) * cell, o + (y + .5f) * cell)
+            for (y in 0 until n) for (x in 0 until n) if (dark(x, y)) {
+                drawCircle(ink, pen / 2, at(x, y))
+                if (dark(x + 1, y)) drawLine(ink, at(x, y), at(x + 1, y), pen, StrokeCap.Round)
+                if (dark(x, y + 1)) drawLine(ink, at(x, y), at(x, y + 1), pen, StrokeCap.Round)
+            }
+            fun eyes(ex: Int, ey: Int) {
+                val ring = Path().apply {
+                    fillType = PathFillType.EvenOdd
+                    addRoundRect(RoundRect(o + ex * cell, o + ey * cell, o + (ex + 7) * cell, o + (ey + 7) * cell, CornerRadius(cell * 2.2f)))
+                    addRoundRect(RoundRect(o + (ex + 1) * cell, o + (ey + 1) * cell, o + (ex + 6) * cell, o + (ey + 6) * cell, CornerRadius(cell * 1.4f)))
+                }
+                drawPath(ring, ink)
+                drawRoundRect(ink, Offset(o + (ex + 2) * cell, o + (ey + 2) * cell), Size(cell * 3, cell * 3), CornerRadius(cell * 1.1f))
+            }
+            eyes(0, 0); eyes(n - 7, 0); eyes(0, n - 7)
+            drawCircle(ink, radius = cell * 3.1f, center = Offset(o + centre * cell, o + centre * cell), style = Stroke(cell * .9f))
+        }
     }
 }
 

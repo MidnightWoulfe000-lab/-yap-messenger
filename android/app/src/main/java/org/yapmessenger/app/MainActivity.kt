@@ -40,6 +40,8 @@ class MainActivity : ComponentActivity() {
                     // Wi-Fi works without Bluetooth permission, so nearby messaging turns on either way.
                     discoverMesh = { withBluetoothPermissions(optional = true) { bluetooth.stop(); secure.enableMesh() } },
                     scan = { scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
+                        // Yap codes are light on dark, so accept inverted codes as well as normal ones.
+                        .addExtra(com.google.zxing.client.android.Intents.Scan.SCAN_TYPE, com.google.zxing.client.android.Intents.Scan.MIXED_SCAN)
                         .setOrientationLocked(false).setPrompt("Scan the other phone's Yap pairing code")) },
                     share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) },
                     profile = profile)

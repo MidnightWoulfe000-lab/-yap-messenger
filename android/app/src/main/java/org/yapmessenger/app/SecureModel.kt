@@ -222,6 +222,8 @@ internal class SecureModel(private val application: Application) {
     // Offers are no longer broadcast to every nearby phone: a bundle contains the
     // permanent identity key. It is only sent to a phone that proves it scanned our QR.
     fun makeOffer() { submit { call("offer"); say("Fresh pairing code created. Both people must scan and confirm.") } }
+    /** Swap the on-screen code for a fresh one. Never replaces a code a friend has already scanned. */
+    fun rotateOffer() { submit(silent = true) { if (initialized && publicState.offer?.reserved != true) call("offer") } }
     fun ensureOffer() { submit { if (initialized && publicState.offer == null) call("offer") } }
     fun importPairing(text: String, name: String) {
         if (text.length > 8192) { say("Pairing package exceeds its limit"); return }
