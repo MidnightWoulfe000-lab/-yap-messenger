@@ -69,6 +69,8 @@ internal class SecureModel(private val application: Application) {
     var relayQueued by mutableIntStateOf(0); private set
     var draft by mutableStateOf("")
     var scannedQr by mutableStateOf("")
+    /** True while we are asking nearby phones for the code we just scanned. */
+    var searching by mutableStateOf(false); private set
     @Volatile private var publicState = SecureSnapshot()
     @Volatile private var foreground = false
     /** True while [MeshService] keeps nearby messaging running with no screen open. */
@@ -233,6 +235,7 @@ internal class SecureModel(private val application: Application) {
             val full = packet.optString("bundle").takeIf { it.isNotEmpty() }
             if (full == null) {
                 waitingPair = WaitingPair(qr, name, qrCommitment(qr), SystemClock.elapsedRealtime() + 10 * 60_000L)
+                main.post { searching = true }
                 lastBundleRequest = 0; requestBundle()
                 say("Looking for that phone nearby. Keep both phones close with nearby messaging on.")
                 return@submit
@@ -252,7 +255,7 @@ internal class SecureModel(private val application: Application) {
     /** Ask every nearby link for the bundle behind the scanned QR. Only its owner can answer. */
     private fun requestBundle() {
         val waiting = waitingPair ?: return
-        if (SystemClock.elapsedRealtime() > waiting.until) { waitingPair = null; say("Could not find that phone nearby. Create a fresh code and try again."); return }
+        if (SystemClock.elapsedRealtime() > waiting.until) { waitingPair = null; main.post { searching = false }; say("Could not find that phone nearby. Create a fresh code and try again."); return }
         if (SystemClock.elapsedRealtime() - lastBundleRequest < 5_000) return
         lastBundleRequest = SystemClock.elapsedRealtime()
         radio.connections().forEach { it.send(MeshFrames.BUNDLE_REQUEST, waiting.commitment, "bundle-request:" + encodeToken(waiting.commitment)) }
@@ -275,7 +278,7 @@ internal class SecureModel(private val application: Application) {
             val contact = publicState.contacts.firstOrNull { it.id == data.optString("contact") }
             linkFor(contact?.route)?.send(MeshFrames.CONFIRM, decodeToken(proof))
         }
-        waitingPair = null; say("Contact saved. Exchange pairing replies or keep both phones connected until verification completes.")
+        waitingPair = null; main.post { searching = false }; say("Contact saved. Exchange pairing replies or keep both phones connected until verification completes.")
     }
     fun send(contact: String) {
         if (busy) return
