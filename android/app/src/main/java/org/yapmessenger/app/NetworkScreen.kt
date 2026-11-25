@@ -39,7 +39,7 @@ import kotlin.math.*
 
 @Composable
 internal fun NetworkScreen(session: ChatSession, preview: Boolean, reduceMotion: Boolean, manage: () -> Unit,
-    meshPeers: Int = 0, internet: Boolean = false, meshVisible: Boolean = false) {
+    meshPeers: Int = 0, internet: Boolean = false, meshVisible: Boolean = false, meshLinks: List<MeshLink> = emptyList()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Network", style = MaterialTheme.typography.headlineLarge, fontSize = 44.sp, letterSpacing = (-2).sp, color = White, modifier = Modifier.weight(1f))
@@ -62,7 +62,9 @@ internal fun NetworkScreen(session: ChatSession, preview: Boolean, reduceMotion:
             }
         } else {
             if (meshPeers > 0 || internet) NetworkPanel {
-                repeat(meshPeers) { index -> NetworkPeerRow("Nearby mesh node ${index + 1}", "Connected · local Bluetooth link") }
+                // The list can briefly lag the count while a link changes; never guess a radio then.
+                val labels = if (meshLinks.size == meshPeers) meshLinks.map { it.label } else List(meshPeers) { "local link" }
+                labels.forEachIndexed { index, label -> NetworkPeerRow("Nearby mesh node ${index + 1}", "Connected · $label") }
                 if (internet) NetworkPeerRow("Configured relay", "Connected · TLS")
             }
             if (meshPeers > 3) Text("Map shows three of $meshPeers active local links", color = Soft, style = MaterialTheme.typography.bodySmall)

@@ -98,7 +98,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                     maxBytes = if (secureId != null) 4096 else 20,
                     sendEnabled = secureId == null || secureContact?.ready == true && !secure.locked,
                     secure = secureId != null)
-                "network" -> NetworkScreen(session, preview, reduceMotion, manage = { connections("network") }, meshPeers = secure.localPeers, internet = secure.internetConnected, meshVisible = secure.meshDiscoverable)
+                "network" -> NetworkScreen(session, preview, reduceMotion, manage = { connections("network") }, meshPeers = secure.localPeers, internet = secure.internetConnected, meshVisible = secure.meshDiscoverable, meshLinks = secure.localLinks)
                 "settings" -> SettingsScreen(profile, openProfile = { profileScreen() }, open = { settingsPage = it; screen = "preference" },
                     preview = { preview = true; selectedChat = "ravi"; screen = "chats" })
                 "preference" -> when {

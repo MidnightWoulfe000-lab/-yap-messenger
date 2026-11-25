@@ -90,8 +90,10 @@ class MeshHubTest {
         waitFor { a.connections().size == 1 && b.connections().size == 1 }
         a.connections().single().send(MeshFrames.KEEPALIVE, ByteArray(0))
         a.connections().single().send(MeshFrames.ENVELOPE, ByteArray(100) { 7 })
-        waitFor { received.any { it.first == MeshFrames.ENVELOPE } }
-        assertEquals("HELLO, keepalive and envelope, one write each", listOf(5 + MeshFrames.HELLO_BYTES, 5, 105), writes.toList())
+        waitFor { received.any { it.first == MeshFrames.ENVELOPE } && writes.size >= 3 }
+        // HELLO always goes first. Two writer threads may send the other two in either order.
+        assertEquals("HELLO is the first write", 5 + MeshFrames.HELLO_BYTES, writes.first())
+        assertEquals("keepalive and envelope, one write each", listOf(5, 105), writes.drop(1).sorted())
         assertEquals("the keepalive must not end the link", 1, b.connections().size)
     }
 
@@ -184,6 +186,19 @@ class MeshHubTest {
         assertNull(MeshWifi.linkIdFromName("yap-xyz"))
         assertNull(MeshWifi.linkIdFromName("printer"))
         assertNull(MeshWifi.linkIdFromName("yap-" + "G".repeat(32)))
+    }
+
+    /** The UI must name the real radio: Bluetooth, Wi-Fi Aware, Wi-Fi Direct or a shared Wi-Fi network. */
+    @Test fun eachLinkKnowsWhatCarriesIt() {
+        assertEquals(MeshLink.WIFI_DIRECT, MeshLink.forWifiAddress("192.168.49.1"))
+        assertEquals(MeshLink.WIFI_DIRECT, MeshLink.forWifiAddress("192.168.49.137"))
+        assertEquals(MeshLink.WIFI_NETWORK, MeshLink.forWifiAddress("192.168.1.20"))
+        assertEquals(MeshLink.WIFI_NETWORK, MeshLink.forWifiAddress("192.168.490.1"))
+        assertEquals(MeshLink.WIFI_NETWORK, MeshLink.forWifiAddress(null))
+        val a = hub(); val b = hub()
+        link(a, b, MeshTransport.BLUETOOTH)
+        waitFor { a.connections().size == 1 }
+        assertEquals(MeshLink.BLUETOOTH, a.connections().single().link)
     }
 
     /** Open Aware links cannot carry a port, so READY carries it, plus the link mode both sides must use. */

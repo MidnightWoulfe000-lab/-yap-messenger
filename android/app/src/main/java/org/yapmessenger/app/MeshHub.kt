@@ -43,6 +43,18 @@ internal object MeshFrames {
 
 internal enum class MeshTransport { BLUETOOTH, WIFI }
 
+/**
+ * What actually carries a link, for display only. [MeshTransport] stays two-valued because
+ * duplicate handling only cares whether a link is Wi-Fi; this tells the user which Wi-Fi.
+ */
+internal enum class MeshLink(val label: String) {
+    BLUETOOTH("Bluetooth"), WIFI_AWARE("Wi-Fi Aware"), WIFI_DIRECT("Wi-Fi Direct"), WIFI_NETWORK("Wi-Fi network");
+    companion object {
+        /** Android gives Wi-Fi Direct groups 192.168.49.0/24; any other Wi-Fi address is a shared network or hotspot. */
+        fun forWifiAddress(address: String?): MeshLink = if (address?.startsWith("192.168.49.") == true) WIFI_DIRECT else WIFI_NETWORK
+    }
+}
+
 internal fun meshToken(bytes: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
 
 /** Unsigned lexicographic comparison of equal-length byte arrays. */
@@ -130,13 +142,14 @@ internal class MeshHub(
      * Adopt a connected stream. [expected] is the remote link ID learnt during discovery
      * (Bluetooth reads it from GATT); the remote HELLO must then match it.
      */
-    fun attach(stream: MeshStream, transport: MeshTransport, outbound: Boolean, expected: ByteArray? = null): Peer? {
+    fun attach(stream: MeshStream, transport: MeshTransport, outbound: Boolean, expected: ByteArray? = null,
+               link: MeshLink = if (transport == MeshTransport.BLUETOOTH) MeshLink.BLUETOOTH else MeshLink.forWifiAddress(stream.remoteAddress)): Peer? {
         val accepted = synchronized(peers) {
             if (!running || slots >= maximumLinks) false else { slots++; true }
         }
         if (!accepted) { runCatching { stream.close() }; return null }
         return try {
-            val peer = Peer(stream, transport, outbound, expected)
+            val peer = Peer(stream, transport, outbound, expected, link)
             readers.execute { peer.readLoop() }; peer
         } catch (_: Exception) {
             synchronized(peers) { slots-- }; runCatching { stream.close() }; null
@@ -175,7 +188,9 @@ internal class MeshHub(
         private val stream: MeshStream,
         val transport: MeshTransport,
         val outbound: Boolean,
-        private val expected: ByteArray?
+        private val expected: ByteArray?,
+        /** What carries this link, for display. */
+        val link: MeshLink = MeshLink.BLUETOOTH
     ) {
         /** Remote link ID (base64url). Empty until HELLO is accepted. */
         @Volatile var token = ""; private set
@@ -255,7 +270,7 @@ internal class MeshHub(
                         token = name
                         keep?.close("replaced by a newer duplicate $transport link")
                         upAt = elapsed()
-                        trace("link up: $transport ${if (outbound) "outbound" else "inbound"}")
+                        trace("link up: ${link.label} ${if (outbound) "outbound" else "inbound"}")
                         first = false; changed(connections().size)
                     } else if (type == MeshFrames.KEEPALIVE) check(bytes.isEmpty())
                     else {
@@ -277,7 +292,7 @@ internal class MeshHub(
 
         fun close(why: String = "closed by its transport") {
             if (!closed.compareAndSet(false, true)) return
-            if (token.isNotEmpty()) trace("link closed: $transport, $why, after ${(elapsed() - upAt) / 1000} s")
+            if (token.isNotEmpty()) trace("link closed: ${link.label}, $why, after ${(elapsed() - upAt) / 1000} s")
             val removed = synchronized(peers) { if (token.isNotEmpty() && peers[token] === this) { peers.remove(token); true } else false }
             runCatching { stream.close() }
             if (removed) changed(connections().size)
