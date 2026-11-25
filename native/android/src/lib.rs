@@ -23,18 +23,24 @@ static PANIC_HOOK: Once = Once::new();
 /// crafted request) from steering the relay database to an arbitrary location.
 fn check_path(path: &str) -> Result<()> {
     use std::path::{Component, Path};
-    ensure!(!path.is_empty() && path.len() < 4096, "invalid native path length");
+    ensure!(
+        !path.is_empty() && path.len() < 4096,
+        "invalid native path length"
+    );
     ensure!(!path.contains('\0'), "invalid native path");
     // Path::components() silently normalises interior "." segments, so inspect
     // the raw segments as well.
     ensure!(
-        !path.split('/').any(|segment| segment == "." || segment == ".."),
+        !path
+            .split('/')
+            .any(|segment| segment == "." || segment == ".."),
         "native path must not contain relative components"
     );
     let path = Path::new(path);
     ensure!(path.is_absolute(), "native path must be absolute");
     ensure!(
-        path.components().all(|c| !matches!(c, Component::ParentDir | Component::CurDir)),
+        path.components()
+            .all(|c| !matches!(c, Component::ParentDir | Component::CurDir)),
         "native path must not contain relative components"
     );
     Ok(())
@@ -59,7 +65,9 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
             // Previously one panic disabled relay storage until the app restarted.
             let mut guard = poisoned.into_inner();
             guard.clear();
-            RELAYS.get().map(|m| m.clear_poison());
+            if let Some(m) = RELAYS.get() {
+                m.clear_poison();
+            }
             guard
         }
     };
@@ -217,7 +225,8 @@ pub extern "system" fn Java_org_yapmessenger_app_NativeBridge_execute(
         Ok(value) => value.into_raw(),
         Err(_) => {
             let _ = env.exception_clear();
-            match env.new_string(r#"{"ok":false,"error":"Native response could not be returned"}"#) {
+            match env.new_string(r#"{"ok":false,"error":"Native response could not be returned"}"#)
+            {
                 Ok(value) => value.into_raw(),
                 Err(_) => std::ptr::null_mut(),
             }
@@ -231,12 +240,22 @@ mod tests {
 
     #[test]
     fn accepts_absolute_paths() {
-        assert!(check_path("/data/user/0/org.yapmessenger.app/no_backup/messaging/relay-v1.redb").is_ok());
+        assert!(
+            check_path("/data/user/0/org.yapmessenger.app/no_backup/messaging/relay-v1.redb")
+                .is_ok()
+        );
     }
 
     #[test]
     fn rejects_unsafe_paths() {
-        for bad in ["", "relative/path", "./x", "/a/../etc/passwd", "/a/./b", "/a\0b"] {
+        for bad in [
+            "",
+            "relative/path",
+            "./x",
+            "/a/../etc/passwd",
+            "/a/./b",
+            "/a\0b",
+        ] {
             assert!(check_path(bad).is_err(), "{bad:?} should be rejected");
         }
         assert!(check_path(&format!("/{}", "a".repeat(4096))).is_err());

@@ -123,7 +123,11 @@ fn peek_stored(value: &[u8]) -> StoreResult<(u64, Token, u64, usize)> {
     }
     let accepted = u64::from_be_bytes(value[..8].try_into().unwrap());
     let source = value[8..24].try_into().unwrap();
-    let expires = u64::from_be_bytes(value[STORED_PREFIX + 60..STORED_PREFIX + 68].try_into().unwrap());
+    let expires = u64::from_be_bytes(
+        value[STORED_PREFIX + 60..STORED_PREFIX + 68]
+            .try_into()
+            .unwrap(),
+    );
     Ok((accepted, source, expires, value.len() - STORED_PREFIX))
 }
 
@@ -395,7 +399,9 @@ impl Relay {
             if result.len() >= limit {
                 break;
             }
-            let Some(value) = queue.get(key.as_slice())? else { continue };
+            let Some(value) = queue.get(key.as_slice())? else {
+                continue;
+            };
             let (_, _, envelope) = parse_stored(value.value())?;
             if let Some(envelope) = envelope.forwarded() {
                 result.push(Forward { key, envelope });

@@ -204,7 +204,11 @@ fn carrier_store_evicts_oldest_when_full() {
     for id in 1..=3u8 {
         stored(
             relay
-                .admit(&envelope(id, b"carried").encode(), [1; 16], clock(start, u64::from(id)))
+                .admit(
+                    &envelope(id, b"carried").encode(),
+                    [1; 16],
+                    clock(start, u64::from(id)),
+                )
                 .unwrap(),
         );
     }
@@ -236,7 +240,11 @@ fn carrier_store_evicts_by_bytes_and_still_rejects_oversized() {
     for id in 1..=3u8 {
         stored(
             relay
-                .admit(&envelope(id, &[7; 1000]).encode(), [1; 16], clock(start, u64::from(id)))
+                .admit(
+                    &envelope(id, &[7; 1000]).encode(),
+                    [1; 16],
+                    clock(start, u64::from(id)),
+                )
                 .unwrap(),
         );
     }

@@ -103,7 +103,9 @@ class MeshHubTest {
                 val out = DataOutputStream(client.getOutputStream())
                 out.writeInt(1 + MeshFrames.HELLO_BYTES); out.writeByte(MeshFrames.HELLO); out.write(ByteArray(24) { 9 }); out.flush()
                 waitFor { a.connections().size == 1 }
-                out.writeInt(frame.first); out.writeByte(frame.second); out.write(ByteArray(1)); out.flush()
+                // The hub may close the socket as soon as it reads the bad length, so the
+                // rest of this write can fail; that is the expected outcome.
+                runCatching { out.writeInt(frame.first); out.writeByte(frame.second); out.write(ByteArray(1)); out.flush() }
                 waitFor { a.connections().isEmpty() }
             }
         }
