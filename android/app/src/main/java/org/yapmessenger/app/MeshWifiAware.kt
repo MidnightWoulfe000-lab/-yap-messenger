@@ -39,9 +39,10 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Discovery: every phone publishes and subscribes to one service. The publisher's
  * service-specific info is only the hub's rotating random link ID. The phone with the
- * lower link ID is the initiator (same rule as Bluetooth and Wi-Fi): it messages the
- * publisher, the publisher opens a listening socket and a data path, and the initiator
- * connects to it. Frames, link IDs and duplicate handling live in [MeshHub].
+ * lower link ID is the initiator (same rule as Bluetooth and Wi-Fi): it sends HELLO, the
+ * publisher opens a listening socket, requests its side of the data path and answers
+ * READY, and only then does the initiator request its side and connect. Discovered
+ * peers are retried every [RETRY_SECONDS] until a Wi-Fi link exists. Frames, link IDs and duplicate handling live in [MeshHub].
  *
  * The data path is deliberately open (no passphrase). A fixed passphrase compiled into
  * an open-source app protects nothing, and every envelope is already end-to-end
@@ -58,6 +59,9 @@ internal class MeshWifiAware(
     companion object {
         private const val SERVICE = "yapmesh"
         private val HELLO = "yap".toByteArray()
+        /** Publisher to initiator: "my side of the data path is requested, ask for yours now". */
+        private val READY = "yap-ready".toByteArray()
+        private const val RETRY_SECONDS = 15L
         private const val MAX_OUTGOING = 2
         private const val MAX_INCOMING = 2
         private const val SETUP_TIMEOUT_MS = 30_000L
@@ -83,7 +87,10 @@ internal class MeshWifiAware(
     private val outgoing = AtomicInteger()
     private val incoming = AtomicInteger()
     private val messageIds = AtomicInteger(1)
-    private val sent = ConcurrentHashMap<Int, Pair<PeerHandle, String>>()
+    private val sent = ConcurrentHashMap<Int, String>() // message ID -> remote link ID
+    // Android reports each publisher only once per subscribe session, so remember who we
+    // saw and retry them; otherwise one failed setup means no Wi-Fi link until rotation.
+    private val discovered = ConcurrentHashMap<String, Pair<PeerHandle, ByteArray>>()
     private var receiverRegistered = false
     private var timerScheduled = false
 
@@ -108,6 +115,7 @@ internal class MeshWifiAware(
         if (!timerScheduled) {
             timerScheduled = true
             timer.scheduleWithFixedDelay({ val now = System.currentTimeMillis(); pending.entries.removeIf { it.value < now } }, 10, 10, TimeUnit.SECONDS)
+            timer.scheduleWithFixedDelay({ if (running) main.post { retryDiscovered() } }, RETRY_SECONDS, RETRY_SECONDS, TimeUnit.SECONDS)
         }
         if (manager.isAvailable) attach()
         return true
@@ -144,7 +152,7 @@ internal class MeshWifiAware(
         runCatching { subscribe?.close() }; subscribe = null
         runCatching { session?.close() }; session = null
         attaching = false
-        pending.clear(); sent.clear(); outgoing.set(0); incoming.set(0)
+        pending.clear(); sent.clear(); discovered.clear(); outgoing.set(0); incoming.set(0)
     }
 
     /** Start (or restart, after a link ID rotation) publishing and subscribing. */
@@ -152,7 +160,7 @@ internal class MeshWifiAware(
         val current = session ?: return
         runCatching { publish?.close() }; publish = null
         runCatching { subscribe?.close() }; subscribe = null
-        pending.clear()
+        pending.clear(); discovered.clear()
         val info = hub.identity.current()
         runCatching {
             current.publish(
@@ -179,22 +187,36 @@ internal class MeshWifiAware(
         override fun onSessionTerminated() { synchronized(this@MeshWifiAware) { subscribe = null } }
         override fun onServiceDiscovered(peerHandle: PeerHandle, serviceSpecificInfo: ByteArray?, matchFilter: List<ByteArray>?) {
             val remote = idFromInfo(serviceSpecificInfo) ?: return
-            if (!running || hub.identity.isOwn(remote) || hub.isLinked(remote)) return
+            if (!running || hub.identity.isOwn(remote)) return
             if (compareBytes(hub.identity.current(), remote) >= 0) return // only the lower link ID initiates
-            val key = meshToken(remote)
-            if (outgoing.get() >= MAX_OUTGOING) return
-            if (pending.putIfAbsent(key, System.currentTimeMillis() + SETUP_TIMEOUT_MS) != null) return
-            val id = messageIds.getAndIncrement()
-            sent[id] = peerHandle to key
-            val target = subscribe
-            if (target == null) { sent.remove(id); pending.remove(key); return }
-            runCatching { target.sendMessage(peerHandle, id, HELLO) }.onFailure { sent.remove(id); pending.remove(key) }
+            discovered[meshToken(remote)] = peerHandle to remote
+            sayHello(peerHandle, remote)
         }
-        override fun onMessageSendSucceeded(messageId: Int) {
-            val (peer, key) = sent.remove(messageId) ?: return
-            initiate(peer, key)
+        override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
+            if (!running || !message.contentEquals(READY)) return
+            val key = discovered.entries.firstOrNull { it.value.first == peerHandle }?.key ?: return
+            initiate(peerHandle, key)
         }
-        override fun onMessageSendFailed(messageId: Int) { sent.remove(messageId)?.let { pending.remove(it.second) } }
+        override fun onMessageSendSucceeded(messageId: Int) { sent.remove(messageId) } // now wait for READY
+        override fun onMessageSendFailed(messageId: Int) { sent.remove(messageId)?.let { pending.remove(it) } }
+    }
+
+    /** Ask a discovered publisher to set up a data path. It answers READY when its side is requested. */
+    private fun sayHello(peer: PeerHandle, remote: ByteArray) {
+        // A Bluetooth link does not count: Wi-Fi should still form and the hub swaps to it.
+        if (hub.isLinkedOverWifi(remote)) return
+        val key = meshToken(remote)
+        if (outgoing.get() >= MAX_OUTGOING) return
+        if (pending.putIfAbsent(key, System.currentTimeMillis() + SETUP_TIMEOUT_MS) != null) return
+        val target = subscribe ?: run { pending.remove(key); return }
+        val id = messageIds.getAndIncrement()
+        sent[id] = key
+        runCatching { target.sendMessage(peer, id, HELLO) }.onFailure { sent.remove(id); pending.remove(key) }
+    }
+
+    private fun retryDiscovered() {
+        if (!running) return
+        discovered.values.toList().forEach { (peer, remote) -> sayHello(peer, remote) }
     }
 
     private fun networkRequest(spec: WifiAwareNetworkSpecifier) = NetworkRequest.Builder()
@@ -257,6 +279,8 @@ internal class MeshWifiAware(
         val spec = runCatching { WifiAwareNetworkSpecifier.Builder(session, peer).setPort(server.localPort).build() }.getOrNull()
             ?: run { release(); return }
         if (runCatching { connectivity.requestNetwork(networkRequest(spec), callback, SETUP_TIMEOUT_MS.toInt()) }.isFailure) { release(); return }
+        // Only now may the initiator ask for its side; asking first is refused by many phones.
+        if (runCatching { session.sendMessage(peer, messageIds.getAndIncrement(), READY) }.isFailure) { release(); return }
         io.execute {
             try {
                 server.soTimeout = SETUP_TIMEOUT_MS.toInt()

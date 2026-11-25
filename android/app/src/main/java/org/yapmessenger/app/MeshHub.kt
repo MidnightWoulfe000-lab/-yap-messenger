@@ -117,6 +117,8 @@ internal class MeshHub(
 
     fun connections(): List<Peer> = peersSnapshot()
     fun isLinked(id: ByteArray): Boolean = synchronized(peers) { peers.containsKey(meshToken(id)) }
+    /** True only for a Wi-Fi link. A Bluetooth link should not stop Wi-Fi from forming: it has more range and speed, and [prefer] swaps to it. */
+    fun isLinkedOverWifi(id: ByteArray): Boolean = synchronized(peers) { peers[meshToken(id)]?.transport == MeshTransport.WIFI }
     private fun peersSnapshot() = synchronized(peers) { peers.values.toList() }
 
     /**

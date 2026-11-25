@@ -2,6 +2,7 @@ package org.yapmessenger.app
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
@@ -180,6 +181,13 @@ internal class MeshWifi(
         dial(gateway, PORT, null)
     }
 
+    /** The network whose local subnet or routes cover [host], or null if none is known. */
+    private fun networkFor(host: InetAddress): Network? = runCatching {
+        connectivity.allNetworks.firstOrNull { network ->
+            connectivity.getLinkProperties(network)?.routes?.any { it.destination.prefixLength > 0 && it.matches(host) } == true
+        }
+    }.getOrNull()
+
     internal fun dial(host: InetAddress, port: Int = PORT, expected: ByteArray? = null) {
         if (!running || port !in 1..65_535) return
         if (!(host.isSiteLocalAddress || host.isLinkLocalAddress)) return // local networks only
@@ -188,6 +196,11 @@ internal class MeshWifi(
         io.execute {
             val socket = Socket()
             try {
+                // A hotspot or router with no internet is not Android's default network, so an
+                // unbound socket to a local address leaves over mobile data and never arrives.
+                // Bind to the network that actually owns this address. Bluetooth is unaffected,
+                // which is why only Wi-Fi failed.
+                networkFor(host)?.let { runCatching { it.bindSocket(socket) } }
                 socket.connect(InetSocketAddress(host, port), 5_000)
                 configure(socket)
                 hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), socket, host.hostAddress), MeshTransport.WIFI, outbound = true, expected = expected)
