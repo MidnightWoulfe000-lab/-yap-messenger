@@ -36,7 +36,8 @@ class MainActivity : ComponentActivity() {
                     send = { withBluetoothPermissions { session.beginSend()?.let(bluetooth::send) } },
                     discover = { withBluetoothPermissions { secure.disableMesh(); bluetooth.startAdvertising() } },
                     secure = secure,
-                    discoverMesh = { withBluetoothPermissions { bluetooth.stop(); secure.enableMesh() } },
+                    // Wi-Fi works without Bluetooth permission, so nearby messaging turns on either way.
+                    discoverMesh = { withBluetoothPermissions(optional = true) { bluetooth.stop(); secure.enableMesh() } },
                     scan = { scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
                         .setOrientationLocked(false).setPrompt("Scan the other phone's Yap pairing code")) },
                     share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) })
@@ -50,14 +51,15 @@ class MainActivity : ComponentActivity() {
         secure.setForeground(true)
     }
 
-    private fun withBluetoothPermissions(action: () -> Unit) {
+    private var permissionOptional = false
+    private fun withBluetoothPermissions(optional: Boolean = false, action: () -> Unit) {
         val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(
             Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
             Manifest.permission.BLUETOOTH_ADVERTISE
         ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         val missing = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) action() else {
-            permissionAction = action
+            permissionAction = action; permissionOptional = optional
             requestPermissions(missing.toTypedArray(), 100)
         }
     }
@@ -69,6 +71,7 @@ class MainActivity : ComponentActivity() {
             val action = permissionAction
             permissionAction = null
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) action?.invoke()
+            else if (permissionOptional) action?.invoke() // continue with Wi-Fi only
             else session.status = "Bluetooth permission is needed. Allow the requested permissions and try again."
         }
     }

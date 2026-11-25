@@ -72,13 +72,19 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private val repository = EndpointRepository(EncryptedEndpointStore(application))
     private val relayFile = File(application.noBackupFilesDir, "messaging/relay-v1.redb").absolutePath
-    private val bundleCache = LinkedHashMap<String, String>()
-    private var waitingQr: Pair<String, String>? = null
+    /** A scanned QR whose public bundle we are asking nearby phones for. */
+    private data class WaitingPair(val qr: String, val name: String, val commitment: ByteArray, val until: Long)
+    @Volatile private var waitingPair: WaitingPair? = null
+    private var lastBundleRequest = 0L
+    /**
+     * Which nearby link belongs to which contact, learnt only from that contact's own
+     * pairing traffic (they answered our bundle request, or sent a valid confirmation).
+     * Keyed by contact route; the route is never sent over the link to find them.
+     */
+    private val pairingLinks = HashMap<String, MeshHub.Peer>()
     private var nextRelayAttempt = 0L
     private var relayFailures = 0
-    private val radio = MeshBluetooth(application,
-        route = { publicState.route.takeIf { it.isNotEmpty() }?.let(::decodeToken) ?: ByteArray(16) },
-        bundle = { publicState.offer?.bundle?.let(::decodeToken) },
+    private val radio = LocalMesh(application,
         report = { say(it) }, changed = { count -> main.post { localPeers = count } },
         visibility = { visible -> main.post { meshDiscoverable = visible } }, record = ::localRecord)
     private val internet = InternetRelay(
@@ -146,7 +152,7 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
     }
     private fun resumeConfigured() = synchronized(lifecycleLock) {
         if (!foreground) return@synchronized
-        if (repository.settings().optBoolean("mesh") && permissions()) radio.start()
+        if (repository.settings().optBoolean("mesh")) radio.start(bluetoothAllowed = permissions())
         nextRelayAttempt = 0
     }
     private fun permissions(): Boolean {
@@ -155,27 +161,53 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         return required.all { getApplication<Application>().checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     }
     fun enableMesh() { submit {
-        check(Build.VERSION.SDK_INT >= 29) { "Local mesh needs Android 10 or later. Legacy Bluetooth and internet remain available." }
         val settings = repository.settings().put("mesh", true); repository.saveSettings(settings)
-        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (foreground) { radio.stop(); radio.start() } }
+        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (foreground) { radio.stop(); radio.start(bluetoothAllowed = permissions()) } }
     } }
     fun disableMesh() { radio.stop(); submit { repository.saveSettings(repository.settings().put("mesh", false)); main.post { meshEnabled = false } } }
-    fun makeOffer() { submit { call("offer"); radio.broadcastBundle(); say("Fresh pairing code created. Both people must scan and confirm.") } }
-    fun ensureOffer() { submit { if (initialized && publicState.offer == null) { call("offer"); radio.broadcastBundle() } } }
+    // Offers are no longer broadcast to every nearby phone: a bundle contains the
+    // permanent identity key. It is only sent to a phone that proves it scanned our QR.
+    fun makeOffer() { submit { call("offer"); say("Fresh pairing code created. Both people must scan and confirm.") } }
+    fun ensureOffer() { submit { if (initialized && publicState.offer == null) call("offer") } }
     fun importPairing(text: String, name: String) {
         if (text.length > 8192) { say("Pairing package exceeds its limit"); return }
         submit {
             val packet = if (text.trim().startsWith("{")) JSONObject(text) else JSONObject().put("qr", text.trim())
             val qr = packet.getString("qr")
-            val full = packet.optString("bundle").takeIf { it.isNotEmpty() } ?: cachedBundle(qr)
-            if (full == null) { waitingQr = qr to name; say("Waiting for this phone's public bundle. Enable local mesh on both phones, or exchange pairing packages."); return@submit }
+            val full = packet.optString("bundle").takeIf { it.isNotEmpty() }
+            if (full == null) {
+                waitingPair = WaitingPair(qr, name, qrCommitment(qr), SystemClock.elapsedRealtime() + 10 * 60_000L)
+                lastBundleRequest = 0; requestBundle()
+                say("Looking for that phone nearby. Keep both phones close with nearby messaging on.")
+                return@submit
+            }
             pair(qr, full, name, packet.optString("confirmation").takeIf { it.isNotEmpty() })
         }
     }
-    private fun cachedBundle(qr: String): String? {
+    private fun qrCommitment(qr: String): ByteArray {
         require(qr.length <= 256 && qr.startsWith("yap:v1:")) { "Not a Yap pairing code" }
         val bytes = decodeToken(qr.removePrefix("yap:v1:")); require(bytes.size == 101)
-        return bundleCache[encodeToken(bytes.copyOfRange(53, 85))]
+        return bytes.copyOfRange(53, 85)
+    }
+    private fun bundleCommitment(bundle: ByteArray): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest("Yap public bundle v1\u0000".toByteArray() + bundle)
+    /** Ask every nearby link for the bundle behind the scanned QR. Only its owner can answer. */
+    private fun requestBundle() {
+        val waiting = waitingPair ?: return
+        if (SystemClock.elapsedRealtime() > waiting.until) { waitingPair = null; say("Could not find that phone nearby. Create a fresh code and try again."); return }
+        if (SystemClock.elapsedRealtime() - lastBundleRequest < 5_000) return
+        lastBundleRequest = SystemClock.elapsedRealtime()
+        radio.connections().forEach { it.send(MeshFrames.BUNDLE_REQUEST, waiting.commitment, "bundle-request:" + encodeToken(waiting.commitment)) }
+    }
+    /** Bundle layout: "YPB1"(4) + identity(33) + nonce(16) + route(16) ... */
+    private fun bundleRoute(bundle: ByteArray): String = encodeToken(bundle.copyOfRange(53, 69))
+    private fun linkFor(route: String?): MeshHub.Peer? = synchronized(pairingLinks) {
+        val peer = route?.let { pairingLinks[it] } ?: return null
+        if (peer.isClosed) { pairingLinks.remove(route); null } else peer
+    }
+    private fun rememberLink(route: String, peer: MeshHub.Peer) = synchronized(pairingLinks) {
+        pairingLinks.entries.removeAll { it.value.isClosed }
+        if (pairingLinks.size < 64) pairingLinks[route] = peer
     }
     private fun pair(qr: String, full: String, name: String, confirmation: String?) {
         check(EndpointAdmission.pairing.allow(1883)) { "Pairing verification rate limit; retry in a minute" }
@@ -183,9 +215,9 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         if (confirmation != null) { check(EndpointAdmission.pairing.allow(101)) { "Pairing verification rate limit; retry in a minute" }; call("confirm", JSONObject().put("bytes", confirmation)) }
         data.optString("confirmation").takeIf { it.isNotEmpty() }?.let { proof ->
             val contact = publicState.contacts.firstOrNull { it.id == data.optString("contact") }
-            radio.connections().filter { it.token == contact?.route }.forEach { it.send(MeshBluetooth.CONFIRM, decodeToken(proof)) }
+            linkFor(contact?.route)?.send(MeshFrames.CONFIRM, decodeToken(proof))
         }
-        waitingQr = null; say("Contact saved. Exchange pairing replies or keep both phones connected until verification completes.")
+        waitingPair = null; say("Contact saved. Exchange pairing replies or keep both phones connected until verification completes.")
     }
     fun send(contact: String) {
         if (busy) return
@@ -228,30 +260,46 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         }
     }
     private fun sourceToken(source: String): String = if (source == "internet-relay") encodeToken(MessageDigest.getInstance("SHA-256").digest(source.toByteArray()).copyOf(16)) else source
-    private fun localRecord(peer: MeshBluetooth.Peer, type: Int, bytes: ByteArray) {
+    private fun localRecord(peer: MeshHub.Peer, type: Int, bytes: ByteArray) {
         if (!foreground || !initialized) return
         when (type) {
-            MeshBluetooth.BUNDLE -> {
-                if (!EndpointAdmission.packet(peer.token, bytes.size)) return
+            MeshFrames.BUNDLE_REQUEST -> {
+                if (!EndpointAdmission.pairing.allow(bytes.size)) return
                 submit(silent = true) {
-                    val hash = MessageDigest.getInstance("SHA-256").digest("Yap public bundle v1\u0000".toByteArray() + bytes)
-                    while (bundleCache.size >= 32) bundleCache.remove(bundleCache.keys.first())
-                    bundleCache[encodeToken(hash)] = encodeToken(bytes)
-                    waitingQr?.let { (qr, name) -> cachedBundle(qr)?.let { pair(qr, it, name, null) } }
+                    // Answer only if the commitment matches OUR current QR. Strangers who
+                    // never saw the QR cannot obtain the bundle (and its identity key).
+                    val offer = publicState.offer ?: return@submit
+                    if (offer.expires <= System.currentTimeMillis()) return@submit
+                    val bundle = decodeToken(offer.bundle)
+                    if (MessageDigest.isEqual(bundleCommitment(bundle), bytes)) peer.send(MeshFrames.BUNDLE, bundle)
                 }
             }
-            MeshBluetooth.CONFIRM -> {
+            MeshFrames.BUNDLE -> {
+                if (!EndpointAdmission.packet(peer.token, bytes.size)) return
+                submit(silent = true) {
+                    // Unsolicited bundles are ignored; only the one we asked for is used.
+                    val waiting = waitingPair ?: return@submit
+                    if (!MessageDigest.isEqual(bundleCommitment(bytes), waiting.commitment)) return@submit
+                    rememberLink(bundleRoute(bytes), peer)
+                    pair(waiting.qr, encodeToken(bytes), waiting.name, null)
+                }
+            }
+            MeshFrames.CONFIRM -> {
                 if (!EndpointAdmission.pairing.allow(bytes.size)) return
                 submit(silent = true) {
                     val data = call("confirm", JSONObject().put("bytes", encodeToken(bytes)))
-                    data.optString("confirmation").takeIf { it.isNotEmpty() && it != "null" }?.let { peer.send(MeshBluetooth.CONFIRM, decodeToken(it)) }
+                    // A valid confirmation is signed by the contact's identity key, so this
+                    // link now provably belongs to them for the rest of pairing.
+                    val id = MessageDigest.getInstance("SHA-256").digest(bytes.copyOfRange(4, 37)).joinToString("") { "%02x".format(it) }
+                    publicState.contacts.firstOrNull { it.id == id }?.let { rememberLink(it.route, peer) }
+                    data.optString("confirmation").takeIf { it.isNotEmpty() && it != "null" }?.let { peer.send(MeshFrames.CONFIRM, decodeToken(it)) }
                 }
             }
-            MeshBluetooth.ENVELOPE -> receive(peer.token, bytes, null) {
+            MeshFrames.ENVELOPE -> receive(peer.token, bytes, null) {
                 // Only after the endpoint snapshot or relay DB commit succeeds.
-                val key = envelopeKey(bytes); peer.send(MeshBluetooth.ACK, key)
+                val key = envelopeKey(bytes); peer.send(MeshFrames.ACK, key)
             }
-            MeshBluetooth.ACK -> { val key = encodeToken(bytes); if (peer.consumeAck(key)) acknowledged(key) }
+            MeshFrames.ACK -> { val key = encodeToken(bytes); if (peer.consumeAck(key)) acknowledged(key) }
         }
     }
     private fun envelopeKey(raw: ByteArray): ByteArray {
@@ -270,22 +318,23 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         }
         if (internet.connected) { relayFailures = 0; internet.poll() }
         val local = radio.connections()
+        if (local.isNotEmpty()) requestBundle()
         if (local.isEmpty() && !internet.connected) return
         if (publicState.queued > 0 || publicState.contacts.any { !it.ready && !it.phase.startsWith("Pairing expired") }) {
             val packets = call("pending", JSONObject().put("force", force)).optJSONArray("packets")
             if (packets != null) for (i in 0 until packets.length()) {
                 val packet = packets.getJSONObject(i); val raw = decodeToken(packet.getString("bytes"))
-                if (packet.getString("kind") == "confirmation") local.filter { it.token == packet.getString("destination") }.forEach { it.send(MeshBluetooth.CONFIRM, raw) }
+                if (packet.getString("kind") == "confirmation") linkFor(packet.getString("destination"))?.send(MeshFrames.CONFIRM, raw)
                 else {
                     val key = packet.getString("key")
-                    local.forEach { it.send(MeshBluetooth.ENVELOPE, raw, key) }
+                    local.forEach { it.send(MeshFrames.ENVELOPE, raw, key) }
                     if (internet.connected) internet.offer(raw, key)
                 }
             }
         }
         local.forEach { peer ->
             val pending = relay("relay_pending", JSONObject().put("peer", peer.token)).getJSONArray("packets")
-            for (i in 0 until pending.length()) pending.getJSONObject(i).let { peer.send(MeshBluetooth.ENVELOPE, decodeToken(it.getString("bytes")), it.getString("key")) }
+            for (i in 0 until pending.length()) pending.getJSONObject(i).let { peer.send(MeshFrames.ENVELOPE, decodeToken(it.getString("bytes")), it.getString("key")) }
         }
         if (internet.connected) {
             val pending = relay("relay_pending", JSONObject().put("peer", sourceToken("internet-relay"))).getJSONArray("packets")

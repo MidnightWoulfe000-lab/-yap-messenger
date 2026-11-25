@@ -23,8 +23,9 @@ Only changes that are mechanical and testable were made.
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | BLE `METADATA` characteristic returns the stable 16-byte route token to any unauthenticated reader (tracking, and links physical presence to the relay mailbox). `MeshBluetooth.kt` | Medium | **Open, needs spec** |
-| 2 | Mesh `HELLO` is unauthenticated, and `peers.putIfAbsent(token)` lets the first claimant of a token hold it. A nearby attacker who read the token can block the real contact from connecting. Content stays safe (envelopes are verified), delivery does not. | Medium | **Open, needs spec** (depends on 1) |
+| 1 | BLE `METADATA` characteristic returns the stable 16-byte route token to any unauthenticated reader (tracking, and links physical presence to the relay mailbox). `MeshBluetooth.kt` | Medium | **Fixed for the link layer** in [local mesh v2](../proposals/local-mesh-v2.md): links use a random ID rotated every 10–20 min; pairing bundles (identity key) are no longer broadcast. See 1b. |
+| 1b | Envelope headers still carry the recipient's permanent route token and a per-contact sender hint, and envelopes go to every nearby link. Nearby modified phones can still recognise a recipient over time. | Medium | **Open, needs spec** (rotating destination tags) |
+| 2 | Mesh `HELLO` is unauthenticated, and `peers.putIfAbsent(token)` lets the first claimant of a token hold it. A nearby attacker who read the token can block the real contact from connecting. Content stays safe (envelopes are verified), delivery does not. | Medium | **Reduced** by v2: IDs rotate, so blocking lasts at most one rotation; duplicate links resolve deterministically. Link authentication still **needs spec** |
 | 3 | `State::check` requires `now >= last_time`. A forward clock jump that gets persisted locks the identity until real time catches up, and pruning meanwhile expires offers and outbox items early. `endpoint/src/engine.rs` | Medium | **Open, needs policy** |
 | 4 | Snapshot has constant AAD and no version counter, so an older valid snapshot can be restored (needs file write access). That rewinds the ratchet and reuses message keys. `EndpointRepository.kt` | Medium (low in practice) | **Open, needs spec** |
 | 5 | A paired contact can fill `messages` to 512 (or leave 64 unrelayed control items) and block sending and receiving until the user clears history. | Medium | **Open, needs product decision** |
@@ -74,7 +75,8 @@ message can contain.
 - For items marked *needs spec*: write a short proposal under `docs/` (threat,
   options, chosen design, test vectors), get review, then implement. Do not pick a
   protocol or retention policy yourself.
-- Suggested order: 1 and 2 together (stop serving the route token to
+- Owner direction (25 Nov 2026): nothing sent to strangers may be permanent or easy to track; keep the app simple for users. Wi-Fi nearby messaging was added on that basis.
+- Suggested order: 1b and 2 together (stop serving the route token to
   unauthenticated readers; bind HELLO to proof of key possession), then 4 and 3,
   then 5, then 7.
 - Keep `cargo test --locked` green in `core/`, `endpoint/`, `relay-server/` and

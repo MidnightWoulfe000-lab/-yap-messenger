@@ -94,14 +94,13 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
     Column(Modifier.fillMaxSize()) {
         PageHeader("Connections", back)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailRow("Local mesh", "${model.localPeers} active local link(s)", Icons.Default.Hub)
-            Text("Forward encrypted envelopes while Yap is open. Queued ciphertext survives restart.", color = Soft)
-            if (Build.VERSION.SDK_INT >= 29) {
-                Button(onClick = enableMesh, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                    Text(if (model.meshEnabled) "Restart local mesh" else "Enable local mesh")
-                }
-                if (model.meshEnabled) OutlinedButton(onClick = model::disableMesh, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Pause local mesh") }
-            } else InfoNote("Local mesh requires Android 10+. Internet and the legacy Bluetooth test remain available.")
+            DetailRow("Nearby messaging", "${model.localPeers} nearby phone(s) connected", Icons.Default.Hub)
+            Text("Sends encrypted messages to nearby phones over Bluetooth and Wi-Fi while Yap is open. No internet needed: phones on the same Wi-Fi, or joined to one phone's hotspot, find each other. Queued messages survive restart.", color = Soft)
+            Button(onClick = enableMesh, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text(if (model.meshEnabled) "Restart nearby messaging" else "Turn on nearby messaging")
+            }
+            if (model.meshEnabled) OutlinedButton(onClick = model::disableMesh, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Pause nearby messaging") }
+            if (Build.VERSION.SDK_INT < 29) InfoNote("This phone can use Wi-Fi only. Bluetooth nearby messaging needs Android 10 or later.")
             HorizontalDivider(color = Surface2)
             DetailRow("Internet relay", if (model.internetConnected) "Connected over TLS" else if (model.relayConfigured) "Configured · waiting for connection" else "Disabled", Icons.Default.Language)
             Text("Use a relay you control. Its operator must register this phone's mailbox token. No public relay is enabled by default.", color = Soft)

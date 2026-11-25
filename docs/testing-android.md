@@ -21,6 +21,21 @@ Android may ask you to allow installs from your browser or file manager. Only in
 6. Repeat from B to A, then try a 20-byte message and five emoji (20 UTF-8 bytes). Six emoji must disable Send and show the byte-limit error. The keyboard Send action must also respect this limit.
 7. Turn Bluetooth off on the sender and try sending. The draft should remain available for retry. Turn Bluetooth on, make both phones discoverable again and retry.
 
+## Nearby messaging over Wi-Fi
+
+This tests the paired, encrypted chat (not the legacy Bluetooth chat). See [local mesh v2](proposals/local-mesh-v2.md).
+
+1. **Same Wi-Fi:** connect both phones to the same Wi-Fi network. Turn mobile data off to prove no internet is used. Bluetooth can be off.
+2. On both phones open **Connections** and tap **Turn on nearby messaging**. Refusing the Bluetooth prompt must still turn on Wi-Fi.
+3. Pair: phone A shows its code, phone B scans it, then B shows its code and A scans it. Pairing must complete with only Wi-Fi on. Status should say it is looking for the phone nearby, then save the contact.
+4. Send messages both ways. Check the nearby count shows 1 phone.
+5. **Hotspot:** turn on phone A's hotspot, join it from phone B, and repeat steps 2–4. This uses the gateway fallback if the hotspot blocks discovery.
+6. **Rotation:** leave both phones connected for 25 minutes and keep messaging. Expect a brief reconnect every 10–20 minutes; no message may be lost or duplicated.
+7. **Mixed:** turn Bluetooth on as well. There must still be one link per phone (nearby count 1), not two.
+8. **Privacy check (optional, technical):** with a network scanner such as an mDNS browser app, the service name should be `yap-` plus 32 hex characters and change after each restart or rotation.
+
+Record phone models, Android versions and the network type (home router, public Wi-Fi, hotspot) for any failure.
+
 ## Compose interface checks
 
 Run the [local build and test commands](../android/README.md#build-and-automated-checks) before committing. CI builds the APK, runs unit tests and lint, and compiles the device tests. Run device tests separately with a connected emulator or phone.
