@@ -3,13 +3,25 @@ package org.yapmessenger.app
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class YapUiTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    // Skip first-run onboarding so these tests start on the Chats screen.
+    private val seedProfile = object : ExternalResource() {
+        override fun before() {
+            InstrumentationRegistry.getInstrumentation().targetContext.getSharedPreferences("yap_profile", 0)
+                .edit().putBoolean("onboarded", true).putString("name", "Test").commit()
+        }
+    }
+    private val compose = createAndroidComposeRule<MainActivity>()
+    @get:Rule val rules: TestRule = RuleChain.outerRule(seedProfile).around(compose)
 
     private fun openChat() = compose.onNodeWithText("Nearby Yap phone").performScrollTo().performClick()
     private fun back() = compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
@@ -20,7 +32,7 @@ class YapUiTest {
     }
 
     @Test fun pairingPageLoadsNativeIdentityAndScannableCode() {
-        compose.onNodeWithText("Pair a contact").performScrollTo().performClick()
+        compose.onNodeWithText("Add a friend").performScrollTo().performClick()
         compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Your Yap pairing code").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithContentDescription("Your Yap pairing code").assertIsDisplayed()
         compose.onNodeWithText("Scan their code").performScrollTo().assertIsEnabled()
@@ -56,6 +68,7 @@ class YapUiTest {
         compose.onNodeWithText("Internet · planned").assertDoesNotExist()
         compose.onNodeWithText("Connections, not physical positions").assertDoesNotExist()
         compose.onNodeWithContentDescription("Network details").performClick()
+        compose.onNodeWithText("Advanced: internet relay and test chat").performScrollTo().performClick()
         compose.onNodeWithText("Relay URL").performScrollTo().assertIsDisplayed()
         back()
         compose.onNodeWithText("Settings").performClick()

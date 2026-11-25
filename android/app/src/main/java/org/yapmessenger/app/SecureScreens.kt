@@ -28,7 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String) -> Unit, back: () -> Unit) {
+internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String) -> Unit, myName: String, back: () -> Unit) {
     val offer = model.snapshot.offer
     var manual by remember { mutableStateOf(false) }
     var packageText by remember { mutableStateOf("") }
@@ -36,23 +36,22 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
     LaunchedEffect(Unit) { model.ensureOffer() }
     LaunchedEffect(model.scannedQr) { if (model.scannedQr.isNotEmpty()) { packageText = model.scannedQr; manual = true } }
     Column(Modifier.fillMaxSize()) {
-        PageHeader("Pair a contact", back)
+        PageHeader("Add a friend", back)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Scan each other's codes", color = White, style = MaterialTheme.typography.titleLarge)
-            Text("Compare the fingerprint in person. Both people must confirm; a nearby phone is not automatically trusted.", color = Soft)
+            Text(if (myName.isNotBlank()) "Hi $myName, meet in person" else "Meet in person", color = White, style = MaterialTheme.typography.titleLarge)
+            Text("1. Show your code below.  2. Scan your friend's code.  3. Check the fingerprints match on both phones. A nearby phone is not trusted until you both confirm.", color = Soft)
             if (offer != null) {
                 PairingQr(offer.qr)
                 if (offer.reserved) Text("This code is reserved for a pending contact. Create a new code for someone else.", color = Soft, style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = scan, enabled = !model.locked, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Scan their code") }
-                    OutlinedButton(onClick = { share(offer.pairingPackage) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Share package") }
-                }
+                Button(onClick = scan, enabled = !model.locked, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Scan their code") }
+                OutlinedButton(onClick = { share(offer.pairingPackage) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Send my code another way") }
             } else Text(if (model.locked) "Protected identity is locked" else "Create a fresh code to pair another contact.", color = Soft)
-            TextButton(onClick = model::makeOffer, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Create a fresh pairing code") }
+            TextButton(onClick = model::makeOffer, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Create a new code") }
             HorizontalDivider(color = Surface2)
             Text("Your fingerprint", color = White, style = MaterialTheme.typography.titleMedium)
+            Text("Your friend should see the same one on their phone.", color = Soft, style = MaterialTheme.typography.bodySmall)
             SelectionContainer { Text(model.snapshot.identity.chunked(8).joinToString(" "), color = Soft, style = MaterialTheme.typography.bodyMedium) }
-            TextButton(onClick = { manual = !manual }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (manual) "Hide manual pairing" else "Paste a code or pairing package") }
+            TextButton(onClick = { manual = !manual }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (manual) "Hide other ways" else "Other ways to add a friend") }
             if (manual) {
                 OutlinedTextField(name, { name = it.take(80) }, label = { Text("Contact name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(packageText, { packageText = it.take(8192) }, label = { Text("Their code or pairing package") }, maxLines = 5, modifier = Modifier.fillMaxWidth())
@@ -91,17 +90,23 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
     var credential by remember { mutableStateOf("") }
     var ca by remember { mutableStateOf("") }
     var advanced by remember { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         PageHeader("Connections", back)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             DetailRow("Nearby messaging", "${model.localPeers} nearby phone(s) connected", Icons.Default.Hub)
-            Text("Sends encrypted messages to nearby phones over Bluetooth and Wi-Fi while Yap is open. No internet, router or hotspot needed: phones in range find each other directly, and drop off when they move away. Phones on the same Wi-Fi or hotspot also link up. Queued messages survive restart.", color = Soft)
+            Text("Sends encrypted messages to phones in range over Bluetooth and Wi-Fi while Yap is open. No internet, router or hotspot needed. Queued messages survive a restart.", color = Soft)
             Button(onClick = enableMesh, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text(if (model.meshEnabled) "Restart nearby messaging" else "Turn on nearby messaging")
             }
             if (model.meshEnabled) OutlinedButton(onClick = model::disableMesh, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Pause nearby messaging") }
             if (Build.VERSION.SDK_INT < 29) InfoNote("This phone can use Wi-Fi only. Bluetooth nearby messaging needs Android 10 or later.")
+            InfoNote(model.status, accent = if (model.locked) Coral else Blue)
             HorizontalDivider(color = Surface2)
+            TextButton(onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(if (showAdvanced) "Hide advanced" else "Advanced: internet relay and test chat")
+            }
+            if (showAdvanced) {
             DetailRow("Internet relay", if (model.internetConnected) "Connected over TLS" else if (model.relayConfigured) "Configured · waiting for connection" else "Disabled", Icons.Default.Language)
             Text("Use a relay you control. Its operator must register this phone's mailbox token. No public relay is enabled by default.", color = Soft)
             OutlinedTextField(url, { url = it.take(2048) }, label = { Text("Relay URL") }, placeholder = { Text("wss://host:port/yap/v1") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -118,11 +123,11 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
             if (model.relayConfigured) OutlinedButton(onClick = model::removeRelay, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Disable internet relay") }
             Text("Mailbox token", color = White, style = MaterialTheme.typography.titleMedium)
             SelectionContainer { Text(model.snapshot.route, color = Soft) }
-            InfoNote(model.status, accent = if (model.locked) Coral else Blue)
             HorizontalDivider(color = Surface2)
             Text("Legacy Bluetooth test", color = White, style = MaterialTheme.typography.titleMedium)
             Text("The original 20-byte chat is unencrypted and separate from paired messaging.", color = Soft)
             OutlinedButton(onClick = legacy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open legacy Bluetooth controls") }
+            }
             Spacer(Modifier.height(24.dp))
         }
     }

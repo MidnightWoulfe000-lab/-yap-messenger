@@ -21,15 +21,26 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun SettingsScreen(open: (String) -> Unit, preview: () -> Unit) {
+internal fun SettingsScreen(profile: ProfileStore, openProfile: () -> Unit, open: (String) -> Unit, preview: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineLarge, color = White)
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surface).clickable(onClickLabel = "Edit profile", onClick = openProfile)
+            .heightIn(min = 80.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            YapAvatar(profile.name, size = 52, tint = avatarColour(profile.colour))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(profile.name.ifBlank { "Set up your profile" }, color = White, style = MaterialTheme.typography.titleMedium)
+                Text("Your name and avatar", color = Soft, style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = Soft)
+        }
+        Spacer(Modifier.height(20.dp))
         Column(Modifier.clip(RoundedCornerShape(20.dp)).background(Surface)
             .border(1.dp, Surface2.copy(alpha = .6f), RoundedCornerShape(20.dp))) {
             listOf(
-                Triple("Network & connections", "Visibility and connections", Icons.Outlined.DeviceHub),
-                Triple("Privacy & identity", "Identity and security", Icons.Outlined.Lock),
+                Triple("Network & connections", "Nearby messaging and internet relay", Icons.Outlined.DeviceHub),
+                Triple("Privacy & identity", "Your fingerprint and contacts", Icons.Outlined.Lock),
                 Triple("Notifications", "Messages and groups", Icons.Outlined.NotificationsNone),
                 Triple("Appearance", "Theme, text and motion", Icons.Outlined.Palette),
                 Triple("Data & storage", "History and storage", Icons.Outlined.Storage),

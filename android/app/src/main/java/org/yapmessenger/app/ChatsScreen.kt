@@ -8,6 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,7 +30,8 @@ internal fun liveChat(session: ChatSession): ChatSummary {
 }
 
 @Composable
-internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (String) -> Unit, newChat: () -> Unit, pairFirst: Boolean = false) {
+internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (String) -> Unit, newChat: () -> Unit, pairFirst: Boolean = false,
+    myName: String = "", myColour: Color = Lime, link: String = "", linkActive: Boolean = false, openProfile: () -> Unit = {}, openLink: () -> Unit = {}) {
     var filter by rememberSaveable(preview) { mutableStateOf("All") }
     var search by rememberSaveable(preview) { mutableStateOf(false) }
     var query by rememberSaveable(preview) { mutableStateOf("") }
@@ -38,8 +42,12 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { Wordmark() }
                 IconButton(onClick = { search = !search; if (!search) query = "" }) { Icon(Icons.Default.Search, "Search chats", tint = White) }
-                IconButton(onClick = newChat) { Icon(Icons.Default.Add, "New chat", tint = White) }
+                IconButton(onClick = newChat) { Icon(Icons.Default.Add, "Add a friend", tint = White) }
+                if (!preview) Box(Modifier.size(48.dp).clickable(onClickLabel = "Your profile", role = Role.Button, onClick = openProfile), contentAlignment = Alignment.Center) {
+                    YapAvatar(myName, size = 34, tint = myColour)
+                }
             }
+            if (!preview && link.isNotEmpty()) ConnectionPill(link, linkActive, openLink)
             if (search) OutlinedTextField(query, { query = it }, label = { Text("Search chats") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(20.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -55,16 +63,21 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = Surface2)
             if (pairFirst) {
+                Spacer(Modifier.height(24.dp))
+                Column(Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(20.dp)).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.PersonAdd, null, tint = Lime, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Add your first friend", color = White, style = MaterialTheme.typography.titleLarge)
+                    Text("Meet in person, show your code and scan theirs. Then you can chat securely.", color = Soft, modifier = Modifier.padding(top = 8.dp))
+                    Button(onClick = newChat, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp)) { Text("Add a friend") }
+                }
                 Spacer(Modifier.height(20.dp))
-                Text("Start with a verified key", color = White, style = MaterialTheme.typography.titleLarge)
-                Text("Pair a contact to send encrypted messages across available links.", color = Soft, modifier = Modifier.padding(top = 8.dp))
-                Button(onClick = newChat, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 48.dp)) { Text("Pair a contact") }
-                Text("Legacy test", color = Soft, style = MaterialTheme.typography.labelMedium)
+                Text("Unencrypted test chat", color = Soft, style = MaterialTheme.typography.labelMedium)
             }
         }
         items(visible, key = { it.id }) { chat ->
             Row(Modifier.fillMaxWidth().clickable { open(chat.id) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                YapAvatar(chat.name.takeIf { preview } ?: "", chat.group)
+                YapAvatar(chat.name.takeIf { preview || chat.id.startsWith("secure:") } ?: "", chat.group)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(chat.name, style = MaterialTheme.typography.titleMedium, color = White)
