@@ -94,7 +94,7 @@ internal fun DebugUpdateSection() {
                     else -> UpdateState.UpToDate(installed)
                 }
             } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { UpdateState.Failed("Could not check for updates: ${e.message ?: "network error"}") }
+            } catch (e: Exception) { UpdateState.Failed("Could not check for updates: ${e.message ?: e.javaClass.simpleName}") }
         }
     }
 
@@ -102,11 +102,15 @@ internal fun DebugUpdateSection() {
         state = UpdateState.Downloading(0)
         scope.launch {
             state = try {
-                val apk = download(context, offer) { state = UpdateState.Downloading(it) }
-                checkSignature(context, apk)?.let { throw IllegalStateException(it) }
+                // Network and file work must stay off the main thread, or Android throws NetworkOnMainThreadException.
+                val apk = withContext(Dispatchers.IO) {
+                    val file = download(context, offer) { state = UpdateState.Downloading(it) }
+                    checkSignature(context, file)?.let { throw IllegalStateException(it) }
+                    file
+                }
                 UpdateState.Note(launchInstaller(context, apk) ?: "Android's installer is open. Confirm the update there.")
             } catch (e: CancellationException) { throw e
-            } catch (e: Exception) { UpdateState.Failed(e.message ?: "The download failed.") }
+            } catch (e: Exception) { UpdateState.Failed(e.message ?: "The download failed (${e.javaClass.simpleName}).") }
         }
     }
 
