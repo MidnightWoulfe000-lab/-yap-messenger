@@ -102,6 +102,8 @@ internal class SecureModel(private val application: Application) {
      * to the sender and waste hops.
      */
     private val ownKeys = LinkedHashSet<String>()
+    /** Per-link and phone-wide flood slow mode for nearby envelopes. See FloodGuard. */
+    private val floodGuard = FloodGuard({ SystemClock.elapsedRealtime() })
     private var nextRelayAttempt = 0L
     private var relayFailures = 0
     private val radio = LocalMesh(application,
@@ -339,7 +341,7 @@ internal class SecureModel(private val application: Application) {
                     data.optString("confirmation").takeIf { it.isNotEmpty() && it != "null" }?.let { peer.send(MeshFrames.CONFIRM, decodeToken(it)) }
                 }
             }
-            MeshFrames.ENVELOPE -> receive(peer.token, bytes, null) {
+            MeshFrames.ENVELOPE -> if (floodGuard.allow(peer.token)) receive(peer.token, bytes, null) {
                 // Only after the endpoint snapshot or relay DB commit succeeds.
                 val key = envelopeKey(bytes); peer.send(MeshFrames.ACK, key)
             }

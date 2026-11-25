@@ -156,6 +156,26 @@ Owner decision: two separate stores.
 - Tests: `core/tests/relay.rs` `carrier_store_evicts_oldest_when_full`,
   `carrier_store_evicts_by_bytes_and_still_rejects_oversized`.
 
+## Flood slow mode (FloodGuard)
+
+Owner idea: if one phone sends far more messages than a person would, the mesh slows
+it down. Implemented in `FloodGuard.kt`, applied to every ENVELOPE from a nearby link
+before any native work.
+
+- Per link: more than 40 envelopes in a minute puts that link in slow mode, one
+  envelope per 3 s for 5 minutes.
+- Phone-wide: more than 100 in a minute across all links puts the phone in slow mode,
+  one per second for 2 minutes. This catches spammers who reconnect under new IDs.
+- Refused envelopes get no ACK, so honest senders keep and retry them. Honest
+  carriers with a big backlog are slowed too (accepted trade-off).
+- Rejected alternatives, and why: telling "fresh" from "carried" messages (hop counts
+  or per-carrier stamps can be faked; signed stamps would record who carried what,
+  a tracking trail); recognising a phone across reconnects (contradicts rotating IDs);
+  neighbours warning each other about spammers (a modified app could falsely accuse
+  real users).
+- Thresholds are starting values; tune them with real crowd tests. Tests:
+  `FloodGuardTest.kt`.
+
 ## What is still permanent (not fixed here, needs a spec)
 
 The **envelope header** still carries the recipient's permanent route token
