@@ -25,9 +25,9 @@ internal fun SettingsScreen(profile: ProfileStore, openProfile: () -> Unit, open
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)) {
         Text("Settings", style = MaterialTheme.typography.headlineLarge, color = White)
         Spacer(Modifier.height(20.dp))
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surface).clickable(onClickLabel = "Edit profile", onClick = openProfile)
+        Row(Modifier.fillMaxWidth().yapCard(18.dp).clickable(onClickLabel = "Edit profile", onClick = openProfile)
             .heightIn(min = 80.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            YapAvatar(profile.name, size = 52, tint = avatarColour(profile.colour))
+            YapAvatar(profile.name, size = 52, tint = avatarColour(profile.colour), shape = RoundedCornerShape(14.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text(profile.name.ifBlank { "Set up your profile" }, color = White, style = MaterialTheme.typography.titleMedium)
@@ -36,8 +36,7 @@ internal fun SettingsScreen(profile: ProfileStore, openProfile: () -> Unit, open
             Icon(Icons.Default.ChevronRight, null, tint = Soft)
         }
         Spacer(Modifier.height(20.dp))
-        Column(Modifier.clip(RoundedCornerShape(20.dp)).background(Surface)
-            .border(1.dp, Surface2.copy(alpha = .6f), RoundedCornerShape(20.dp))) {
+        Column(Modifier.yapCard(18.dp)) {
             listOf(
                 Triple("Network & connections", "Nearby messaging and internet relay", Icons.Outlined.DeviceHub),
                 Triple("Privacy & identity", "Your fingerprint and contacts", Icons.Outlined.Lock),

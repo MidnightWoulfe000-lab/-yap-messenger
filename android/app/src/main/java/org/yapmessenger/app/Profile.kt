@@ -63,8 +63,8 @@ private fun ColourPicker(selected: Int, onSelect: (Int) -> Unit) {
             val on = index == selected
             Box(Modifier.size(48.dp).selectable(on, role = Role.RadioButton, onClick = { onSelect(index) })
                 .semantics { contentDescription = AvatarColourNames[index] }, contentAlignment = Alignment.Center) {
-                Box(Modifier.size(36.dp).background(colour, CircleShape)
-                    .border(if (on) 3.dp else 0.dp, White, CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(34.dp).background(colour, RoundedCornerShape(10.dp))
+                    .border(if (on) 3.dp else 0.dp, White, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
                     if (on) Icon(Icons.Default.Check, null, tint = Ink, modifier = Modifier.size(20.dp))
                 }
             }
@@ -131,7 +131,7 @@ internal fun ProfileScreen(store: ProfileStore, fingerprint: String, addFriend: 
     Column(Modifier.fillMaxSize()) {
         PageHeader("Your profile", back)
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { YapAvatar(name, size = 96, tint = avatarColour(colour)) }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { YapAvatar(name, size = 112, tint = avatarColour(colour)) }
             OutlinedTextField(name, { name = it.take(MaxProfileName) }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("Avatar colour", style = MaterialTheme.typography.titleMedium, color = White)
             ColourPicker(colour) { colour = it }
@@ -140,7 +140,7 @@ internal fun ProfileScreen(store: ProfileStore, fingerprint: String, addFriend: 
             }
             Text("Your name is stored on this phone only. It isn't sent to anyone you add.", style = MaterialTheme.typography.bodySmall, color = Soft)
             HorizontalDivider(color = Surface2)
-            DetailRow("Add a friend", "Show your code and scan theirs", Icons.Default.QrCode2, addFriend)
+            LimeAction("Add a friend", "Show your code, scan theirs", Icons.Default.QrCode2, addFriend)
             TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (details) "Hide advanced details" else "Advanced details") }
             if (details) {
                 Text("Your fingerprint", color = White, style = MaterialTheme.typography.titleMedium)
@@ -154,14 +154,12 @@ internal fun ProfileScreen(store: ProfileStore, fingerprint: String, addFriend: 
     }
 }
 
-/** Small status chip shown in the Chats header. [label] reflects only what the transport layer reports. */
+/** Plain status line for the Chats header. [label] reflects only what the transport layer reports. */
 @Composable
-internal fun ConnectionPill(label: String, active: Boolean, onClick: () -> Unit) {
+internal fun ConnectionStatus(label: String, active: Boolean, onClick: () -> Unit) {
     Row(Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "Connections", role = Role.Button, onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.background(Surface, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).background(if (active) Lime else Soft, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, color = White, fontWeight = FontWeight.Medium)
-        }
+        Box(Modifier.size(8.dp).background(if (active) Lime else Soft, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = if (active) Lime else Soft)
     }
 }
