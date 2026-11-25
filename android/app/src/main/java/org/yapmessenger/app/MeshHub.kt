@@ -34,6 +34,8 @@ internal object MeshFrames {
     /** "I am the recipient and have it": the carrier can drop its copy entirely. */
     const val DELIVERED = 8
     const val MAX_FRAME = 65_537
+    /** A bundle may be followed by the sender's display name (UTF-8, at most 30 characters). Display only. */
+    const val MAX_NAME = 120
     const val ID_BYTES = 16
     const val NONCE_BYTES = 8
     const val HELLO_BYTES = ID_BYTES + NONCE_BYTES
@@ -243,7 +245,7 @@ internal class MeshHub(
                     else {
                         check(type in MeshFrames.BUNDLE..MeshFrames.ACK || type == MeshFrames.BUNDLE_REQUEST || type == MeshFrames.DELIVERED)
                         when (type) {
-                            MeshFrames.BUNDLE -> check(bytes.size == 1883)
+                            MeshFrames.BUNDLE -> check(bytes.size in 1883..1883 + MeshFrames.MAX_NAME)
                             MeshFrames.CONFIRM -> check(bytes.size == 101)
                             MeshFrames.ACK, MeshFrames.DELIVERED -> check(bytes.size == 48)
                             MeshFrames.ENVELOPE -> check(bytes.size >= 1 + EffortStamp.BYTES + 74)

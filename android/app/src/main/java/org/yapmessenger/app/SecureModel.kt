@@ -240,6 +240,8 @@ internal class SecureModel(private val application: Application) {
             pair(qr, full, name, packet.optString("confirmation").takeIf { it.isNotEmpty() })
         }
     }
+    private fun myProfileName(): String =
+        application.getSharedPreferences("yap_profile", android.content.Context.MODE_PRIVATE).getString("name", "").orEmpty().trim()
     private fun qrCommitment(qr: String): ByteArray {
         require(qr.length <= 256 && qr.startsWith("yap:v1:")) { "Not a Yap pairing code" }
         val bytes = decodeToken(qr.removePrefix("yap:v1:")); require(bytes.size == 101)
@@ -356,7 +358,8 @@ internal class SecureModel(private val application: Application) {
                     val offer = publicState.offer ?: return@submit
                     if (offer.expires <= System.currentTimeMillis()) return@submit
                     val bundle = decodeToken(offer.bundle)
-                    if (MessageDigest.isEqual(bundleCommitment(bundle), bytes)) peer.send(MeshFrames.BUNDLE, bundle)
+                    // The reply carries our profile name after the bundle, so the friend sees who we are.
+                    if (MessageDigest.isEqual(bundleCommitment(bundle), bytes)) peer.send(MeshFrames.BUNDLE, bundle + myProfileName().toByteArray(Charsets.UTF_8).take(MeshFrames.MAX_NAME).toByteArray())
                 }
             }
             MeshFrames.BUNDLE -> {
@@ -364,9 +367,13 @@ internal class SecureModel(private val application: Application) {
                 submit(silent = true) {
                     // Unsolicited bundles are ignored; only the one we asked for is used.
                     val waiting = waitingPair ?: return@submit
-                    if (!MessageDigest.isEqual(bundleCommitment(bytes), waiting.commitment)) return@submit
-                    rememberLink(bundleRoute(bytes), peer)
-                    pair(waiting.qr, encodeToken(bytes), waiting.name, null)
+                    val bundle = bytes.copyOf(1883)
+                    if (!MessageDigest.isEqual(bundleCommitment(bundle), waiting.commitment)) return@submit
+                    // Anything after the bundle is the sender's display name. It is not signed,
+                    // so it is only a label; the fingerprint is what both people verify.
+                    val theirName = String(bytes, 1883, bytes.size - 1883, Charsets.UTF_8).filter { !it.isISOControl() }.trim().take(30)
+                    rememberLink(bundleRoute(bundle), peer)
+                    pair(waiting.qr, encodeToken(bundle), waiting.name.ifBlank { theirName }, null)
                 }
             }
             MeshFrames.CONFIRM -> {
