@@ -1,0 +1,24 @@
+[package]
+name = "yap-android-native"
+version = "0.2.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+publish = false
+
+[lib]
+name = "yap_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+yap-endpoint = { path = "../../endpoint" }
+yap-core = { path = "../../core" }
+jni = "=0.21.1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = "symbols"
+codegen-units = 1

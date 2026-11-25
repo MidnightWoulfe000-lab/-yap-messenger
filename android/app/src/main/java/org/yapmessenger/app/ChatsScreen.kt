@@ -27,7 +27,7 @@ internal fun liveChat(session: ChatSession): ChatSummary {
 }
 
 @Composable
-internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (String) -> Unit, newChat: () -> Unit) {
+internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (String) -> Unit, newChat: () -> Unit, pairFirst: Boolean = false) {
     var filter by rememberSaveable(preview) { mutableStateOf("All") }
     var search by rememberSaveable(preview) { mutableStateOf(false) }
     var query by rememberSaveable(preview) { mutableStateOf("") }
@@ -54,6 +54,13 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = Surface2)
+            if (pairFirst) {
+                Spacer(Modifier.height(20.dp))
+                Text("Start with a verified key", color = White, style = MaterialTheme.typography.titleLarge)
+                Text("Pair a contact to send encrypted messages across available links.", color = Soft, modifier = Modifier.padding(top = 8.dp))
+                Button(onClick = newChat, modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).heightIn(min = 48.dp)) { Text("Pair a contact") }
+                Text("Legacy test", color = Soft, style = MaterialTheme.typography.labelMedium)
+            }
         }
         items(visible, key = { it.id }) { chat ->
             Row(Modifier.fillMaxWidth().clickable { open(chat.id) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {

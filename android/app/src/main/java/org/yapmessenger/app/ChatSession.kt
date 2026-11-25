@@ -15,7 +15,8 @@ internal data class ChatMessage(
     // Populated only by the explicitly labelled design-preview fixtures.
     val fileName: String? = null,
     val fileSize: String? = null,
-    val recipientReceiptAt: Long? = null
+    val recipientReceiptAt: Long? = null,
+    val secure: Boolean = false
 )
 
 internal enum class PeerObservation { NONE, CONNECTING, CONNECTED, RECENT }

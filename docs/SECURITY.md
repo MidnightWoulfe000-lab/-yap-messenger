@@ -1,6 +1,11 @@
 # Yap security: decisions, requirements and open questions
 
-**Status: security design in progress. The current Android BLE prototype is not a secure messenger.**
+**Status: experimental implementation; no independent security audit.** Android
+0.2 debug now includes tested native one-to-one encryption, mutual key pairing
+and Keystore-backed snapshots. The original BLE test remains unencrypted. The
+[endpoint contract](android-endpoint-v1.md) specifies this limited release;
+[release boundaries](debug-release-0.2.md) distinguish emulator evidence from
+pending physical mesh, group, recovery and multi-device work.
 
 This document preserves the security direction discussed for Yap. It is **not** a completed cryptographic protocol or an audit. If a detail is not specified, ask rather than silently choosing one.
 
@@ -36,10 +41,17 @@ This document preserves the security direction discussed for Yap. It is **not** 
 - Threat model and security guarantees for each release stage.
 
 ## Release guardrails
-- Never advertise this prototype as encrypted, anonymous, verified or safe for sensitive communication.
+- Describe encrypted paired conversations separately from the unencrypted legacy
+  test. Never advertise anonymity, an independent audit or safety for sensitive
+  communication from these development tests.
 - Do not implement cryptographic or governance features from assumptions. Write a design proposal, review its threat model, then implement and test.
 - Do not break known-good Bluetooth messaging as a side effect of UI work.
 - Do not claim an external security audit has happened unless it has.
 
 ## Present state
-The November 2026 Android prototype uses unauthenticated, unencrypted, foreground-only BLE messages of up to 20 UTF-8 bytes, with no saved history. Two-phone exchange has been demonstrated in user tests. This does not establish confidentiality, authenticity or reliable delivery.
+The legacy November 2026 Bluetooth test uses unauthenticated, unencrypted,
+foreground-only messages of up to 20 UTF-8 bytes, with no saved history.
+Two-phone exchange was demonstrated in user tests. The new 0.2 paired endpoint
+uses the separately reviewed contract linked above. Its native encryption and
+persistence tests do not validate physical radio interoperability or establish
+production readiness.

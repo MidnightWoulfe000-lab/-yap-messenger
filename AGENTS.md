@@ -25,4 +25,4 @@ For UI changes, check hierarchy, contrast, text scaling, touch targets, reduced 
 
 ## Engineering
 
-Android is currently a Bluetooth prototype, not a secure messenger. Do not imply that messages are end-to-end encrypted or identities verified until those features exist and have been tested. Keep UI work separate from protocol/security changes where possible.
+Before changing paired Android messaging, read [the endpoint contract](docs/android-endpoint-v1.md) and [release boundaries](docs/debug-release-0.2.md). Keep the experimental encrypted endpoint separate from the unencrypted legacy chat. Never infer an independent audit, physical multi-hop validation or production readiness from emulator tests.

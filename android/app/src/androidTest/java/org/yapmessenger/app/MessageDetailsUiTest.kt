@@ -11,6 +11,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class MessageDetailsUiTest {
+    private val secure by lazy { SecureModel(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application) }
     @get:Rule val compose = createComposeRule()
 
     @Test fun liveBluetoothAcknowledgementDoesNotRenderARecipientReceipt() {
@@ -18,7 +19,7 @@ class MessageDetailsUiTest {
         session.draft = "Real message"
         session.beginSend()
         session.onBluetoothUpdate("Message delivered to the other phone.")
-        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}) } }
+        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}, secure = secure, discoverMesh = {}, scan = {}, share = {}) } }
         compose.onNodeWithText("Nearby Yap phone").performScrollTo().performClick()
         compose.onNodeWithText("Real message").performScrollTo().performClick()
         compose.onNodeWithText("Recipient receipt not confirmed").performScrollTo().assertIsDisplayed()
@@ -31,7 +32,7 @@ class MessageDetailsUiTest {
         session.onBluetoothUpdate("Message received: Keep this")
         var sends = 0
         var discover = 0
-        compose.setContent { YapTheme { YapApp(session, send = { sends++ }, discover = { discover++ }) } }
+        compose.setContent { YapTheme { YapApp(session, send = { sends++ }, discover = { discover++ }, secure = secure, discoverMesh = {}, scan = {}, share = {}) } }
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Preview the full design").performScrollTo().performClick()
         compose.onNodeWithText("Ravi").performScrollTo().performClick()
@@ -49,7 +50,7 @@ class MessageDetailsUiTest {
 
     @Test fun networkKeepsYourPhoneCentredWhenAPeerIsSeen() {
         val session = ChatSession()
-        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}) } }
+        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}, secure = secure, discoverMesh = {}, scan = {}, share = {}) } }
         compose.onNodeWithText("Network").performClick()
         fun checkCentre() {
             val map = compose.onNodeWithTag("network-map").fetchSemanticsNode().boundsInRoot

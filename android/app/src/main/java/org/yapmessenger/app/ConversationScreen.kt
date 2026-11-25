@@ -25,7 +25,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, preview: Boolean,
     draft: String, onDraft: (String) -> Unit, pending: Boolean, status: String, send: () -> Unit,
-    back: () -> Unit, controls: () -> Unit, group: () -> Unit, details: (Long) -> Unit) {
+    back: () -> Unit, controls: () -> Unit, group: () -> Unit, details: (Long) -> Unit,
+    maxBytes: Int = 20, sendEnabled: Boolean = true, secure: Boolean = false) {
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size, pending) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size) }
     Column(Modifier.fillMaxSize()) {
@@ -39,11 +40,12 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                     chat.group -> "Sample group · 6 members"
                     preview && chat.id == "maya" -> "Internet"
                     preview && chat.id == "updates" -> "Sample app updates"
-                    else -> "Direct Bluetooth"
+                    secure -> if (sendEnabled) "Paired key · available links" else status
+                    else -> "Legacy Bluetooth · unencrypted"
                 },
                     color = Soft, style = MaterialTheme.typography.labelMedium)
             }
-            IconButton(onClick = controls) { Icon(Icons.Default.MoreVert, "Bluetooth controls", tint = White) }
+            IconButton(onClick = controls) { Icon(Icons.Default.MoreVert, if (secure) "Contact details" else "Bluetooth controls", tint = White) }
         }
         HorizontalDivider(color = Surface2)
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -59,7 +61,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                     Icon(Icons.Default.Forum, null, tint = Lime, modifier = Modifier.size(42.dp))
                     Spacer(Modifier.height(16.dp))
                     Text("Say something.", style = MaterialTheme.typography.headlineMedium, color = White)
-                    Text("Two phones. No internet. Just Yap.", color = Soft, modifier = Modifier.padding(top = 8.dp))
+                    Text(if (secure) "Messages stay queued until a connection is available." else "Two phones. No internet. Just Yap.", color = Soft, modifier = Modifier.padding(top = 8.dp))
                 }
             }
             items(messages, key = { it.id }) { MessageBubble(it) { details(it.id) } }
@@ -70,7 +72,8 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
         }
         if (preview) Text("Preview only · Sending is disabled", style = MaterialTheme.typography.labelMedium, color = Soft,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
-        Composer(draft = if (preview) "" else draft, onDraft = onDraft, pending = pending, enabled = !preview, send = send)
+        if (secure && !sendEnabled) Text(status, color = Soft, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+        Composer(draft = if (preview) "" else draft, onDraft = onDraft, pending = pending, enabled = !preview && sendEnabled, send = send, maxBytes = maxBytes)
     }
 }
 
@@ -100,13 +103,13 @@ private fun MessageBubble(message: ChatMessage, details: () -> Unit) {
 }
 
 @Composable
-private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean, enabled: Boolean, send: () -> Unit) {
+private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean, enabled: Boolean, send: () -> Unit, maxBytes: Int) {
     val bytes = draft.toByteArray(Charsets.UTF_8).size
-    val canSend = enabled && bytes in 1..20 && !pending
+    val canSend = enabled && bytes in 1..maxBytes && !pending
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextField(value = draft, onValueChange = onDraft, enabled = enabled, placeholder = { Text("Message") },
-                singleLine = true, isError = bytes > 20, shape = RoundedCornerShape(28.dp),
+                singleLine = maxBytes == 20, maxLines = if (maxBytes == 20) 1 else 4, isError = bytes > maxBytes, shape = RoundedCornerShape(28.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
                 colors = TextFieldDefaults.colors(focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                     unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -118,7 +121,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
         }
-        if (enabled) Text(when { pending -> "Sending… Keep Yap open."; bytes > 20 -> "$bytes / 20 UTF-8 bytes · Shorten your message"; else -> "$bytes / 20 UTF-8 bytes" },
-            color = if (bytes > 20) Coral else Soft, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 14.dp, top = 6.dp))
+        if (enabled) Text(when { pending -> "Saving to queue…"; bytes > maxBytes -> "$bytes / $maxBytes UTF-8 bytes · Shorten your message"; else -> "$bytes / $maxBytes UTF-8 bytes" },
+            color = if (bytes > maxBytes) Coral else Soft, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 14.dp, top = 6.dp))
     }
 }

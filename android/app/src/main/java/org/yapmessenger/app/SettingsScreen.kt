@@ -33,7 +33,7 @@ internal fun SettingsScreen(open: (String) -> Unit, preview: () -> Unit) {
                 Triple("Notifications", "Messages and groups", Icons.Outlined.NotificationsNone),
                 Triple("Appearance", "Theme, text and motion", Icons.Outlined.Palette),
                 Triple("Data & storage", "History and storage", Icons.Outlined.Storage),
-                Triple("About Yap", "Version 0.1.0-dev", Icons.Outlined.Info)
+                Triple("About Yap", "Version 0.2.0-debug", Icons.Outlined.Info)
             ).forEachIndexed { index, (title, subtitle, icon) ->
                 if (index > 0) HorizontalDivider(color = Surface2.copy(alpha = .6f), modifier = Modifier.padding(start = 56.dp, end = 16.dp))
                 SettingsRow(title, subtitle, icon) { open(title) }

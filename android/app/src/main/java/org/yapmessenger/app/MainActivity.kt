@@ -4,15 +4,20 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.ViewModelProvider
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
     private lateinit var bluetooth: YapBluetooth
     private val session by lazy { ViewModelProvider(this)[ChatSession::class.java] }
+    private val secure by lazy { ViewModelProvider(this)[SecureModel::class.java] }
+    private val scan = registerForActivityResult(ScanContract()) { result -> result.contents?.let { secure.scannedQr = it } }
     private var permissionAction: (() -> Unit)? = null
     private var acceptsBluetoothUpdates = false
 
@@ -29,7 +34,12 @@ class MainActivity : ComponentActivity() {
             YapTheme {
                 YapApp(session,
                     send = { withBluetoothPermissions { session.beginSend()?.let(bluetooth::send) } },
-                    discover = { withBluetoothPermissions { bluetooth.startAdvertising() } })
+                    discover = { withBluetoothPermissions { secure.disableMesh(); bluetooth.startAdvertising() } },
+                    secure = secure,
+                    discoverMesh = { withBluetoothPermissions { bluetooth.stop(); secure.enableMesh() } },
+                    scan = { scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
+                        .setOrientationLocked(false).setPrompt("Scan the other phone's Yap pairing code")) },
+                    share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) })
             }
         }
     }
@@ -37,6 +47,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         acceptsBluetoothUpdates = true
+        secure.setForeground(true)
     }
 
     private fun withBluetoothPermissions(action: () -> Unit) {
@@ -66,6 +77,7 @@ class MainActivity : ComponentActivity() {
         acceptsBluetoothUpdates = false
         permissionAction = null
         bluetooth.stop()
+        secure.setForeground(false)
         session.onStopped()
         super.onStop()
     }

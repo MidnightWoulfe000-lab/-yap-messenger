@@ -23,3 +23,8 @@ xcuserdata/
 !.env.example
 *.keystore
 *.jks
+*.p12
+*.pfx
+!relay-server/tests/fixtures/localhost.p12
+/relay-server/private*.json
+/android/app/src/main/jniLibs/

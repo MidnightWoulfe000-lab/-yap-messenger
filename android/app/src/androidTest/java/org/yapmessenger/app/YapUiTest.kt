@@ -19,6 +19,14 @@ class YapUiTest {
         compose.onNodeWithText("Design preview · Sample data").assertIsDisplayed()
     }
 
+    @Test fun pairingPageLoadsNativeIdentityAndScannableCode() {
+        compose.onNodeWithText("Pair a contact").performScrollTo().performClick()
+        compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Your Yap pairing code").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Your Yap pairing code").assertIsDisplayed()
+        compose.onNodeWithText("Scan their code").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Your fingerprint").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun composerChecksUtf8BytesAndKeyboardSendDoesNotBypassValidation() {
         openChat()
         compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
@@ -48,11 +56,11 @@ class YapUiTest {
         compose.onNodeWithText("Internet · planned").assertDoesNotExist()
         compose.onNodeWithText("Connections, not physical positions").assertDoesNotExist()
         compose.onNodeWithContentDescription("Network details").performClick()
-        compose.onNodeWithText("Make this phone discoverable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Relay URL").performScrollTo().assertIsDisplayed()
         back()
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Privacy & identity").performScrollTo().performClick()
-        compose.onNodeWithText("Encryption and verified identities are not available in this prototype.").assertIsDisplayed()
+        compose.onNodeWithText("Your identity").assertIsDisplayed()
         back()
         back()
         compose.onNodeWithText("All").assertIsDisplayed()

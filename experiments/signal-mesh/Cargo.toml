@@ -1,0 +1,16 @@
+[package]
+name = "yap-signal-mesh-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Isolated libsignal feasibility test; not linked into the Yap app"
+
+[dev-dependencies]
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal.git", rev = "257105c55a7389ca6b1e85185e2769465e6729f1" }
+rand = "=0.9.4"
+futures = "=0.3.31"
+yap-core = { path = "../../core" }
+yap-relay-server = { path = "../../relay-server" }
+native-tls = "=0.2.18"
+tungstenite = { version = "=0.30.0", features = ["native-tls"] }

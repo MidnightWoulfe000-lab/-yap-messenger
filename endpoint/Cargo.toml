@@ -1,0 +1,18 @@
+[package]
+name = "yap-endpoint"
+version = "0.2.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+yap-core = { path = "../core" }
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal.git", rev = "257105c55a7389ca6b1e85185e2769465e6729f1" }
+rand = "=0.9.4"
+async-trait = "0.1"
+futures = "=0.3.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "=0.22.1"
+sha2 = "=0.10.9"
+anyhow = "1"

@@ -1,11 +1,21 @@
-name: Rust core
+name: Messaging checks
 on:
   push:
   pull_request:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        manifest: [core/Cargo.toml, relay-server/Cargo.toml, experiments/signal-mesh/Cargo.toml, endpoint/Cargo.toml, native/android/Cargo.toml]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path core/Cargo.toml
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: rustfmt, clippy
+      - name: Install TLS and Protobuf build prerequisites
+        if: matrix.manifest != 'core/Cargo.toml'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler pkg-config libssl-dev
+      - run: cargo fmt --manifest-path ${{ matrix.manifest }} --check
+      - run: cargo test --locked --manifest-path ${{ matrix.manifest }}
+      - run: cargo clippy --locked --manifest-path ${{ matrix.manifest }} --all-targets -- -D warnings

@@ -6,3 +6,5 @@ license = "GPL-3.0-only"
 description = "Experimental store-and-forward message engine for Yap"
 
 [dependencies]
+redb = "=2.6.0"
+sha2 = "=0.10.9"
