@@ -202,6 +202,7 @@ internal fun AboutMessagingScreen(licences: () -> Unit, back: () -> Unit) {
             InfoNote("Experimental paired messaging, foreground local relaying and optional internet relay. Not independently security-audited.", accent = Coral)
             Text("The native adapter includes libsignal under AGPLv3. Original Yap core sources remain GPLv3; dependency notices and source build instructions accompany the debug release.", color = Soft)
             OutlinedButton(onClick = licences, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Source & licences") }
+            DebugUpdateSection()
         }
     }
 }
