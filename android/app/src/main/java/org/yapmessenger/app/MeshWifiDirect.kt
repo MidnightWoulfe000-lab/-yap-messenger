@@ -153,6 +153,9 @@ internal class MeshWifiDirect(
     private fun search() {
         val channel = channel ?: return
         val p2p = manager ?: return
+        // Many phones only answer service queries while they are themselves in peer
+        // discovery, so without this our advert is invisible to everyone else.
+        runCatching { p2p.discoverPeers(channel, null) }
         p2p.clearServiceRequests(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() = request()
             override fun onFailure(reason: Int) = request()
@@ -173,7 +176,8 @@ internal class MeshWifiDirect(
 
     private fun found(record: Map<String, String>?, device: WifiP2pDevice) {
         val remote = idFromRecord(record) ?: return
-        if (!running || hub.identity.isOwn(remote) || hub.isLinked(remote)) return
+        // A Bluetooth link does not count: Wi-Fi should still form and the hub swaps to it.
+        if (!running || hub.identity.isOwn(remote) || hub.isLinkedOverWifi(remote)) return
         if (compareBytes(hub.identity.current(), remote) >= 0) return // only the lower link ID connects
         val now = System.currentTimeMillis()
         // One connection attempt at a time, and never leave a group we are a client in.
