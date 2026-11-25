@@ -90,8 +90,10 @@ class MeshHubTest {
         waitFor { a.connections().size == 1 && b.connections().size == 1 }
         a.connections().single().send(MeshFrames.KEEPALIVE, ByteArray(0))
         a.connections().single().send(MeshFrames.ENVELOPE, ByteArray(100) { 7 })
-        waitFor { received.any { it.first == MeshFrames.ENVELOPE } }
-        assertEquals("HELLO, keepalive and envelope, one write each", listOf(5 + MeshFrames.HELLO_BYTES, 5, 105), writes.toList())
+        waitFor { received.any { it.first == MeshFrames.ENVELOPE } && writes.size >= 3 }
+        // HELLO always goes first. Two writer threads may send the other two in either order.
+        assertEquals("HELLO is the first write", 5 + MeshFrames.HELLO_BYTES, writes.first())
+        assertEquals("keepalive and envelope, one write each", listOf(5, 105), writes.drop(1).sorted())
         assertEquals("the keepalive must not end the link", 1, b.connections().size)
     }
 
