@@ -34,8 +34,9 @@ internal const val MaxProfileName = 30
 internal fun avatarColour(index: Int): Color = AvatarColours[index.coerceIn(0, AvatarColours.lastIndex)]
 
 /**
- * The user's own display name and avatar colour. This lives only on this phone: it is not
- * sent to contacts, so it takes no part in pairing or identity checks.
+ * The user's own display name and avatar colour. The name is handed to a friend only when they
+ * scan this phone's pairing code, so they see who you are. It is not signed and takes no part in
+ * pairing or identity checks. The colour stays on this phone.
  */
 internal class ProfileStore(context: Context) {
     private val prefs = context.getSharedPreferences("yap_profile", Context.MODE_PRIVATE)
