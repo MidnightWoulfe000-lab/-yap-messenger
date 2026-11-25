@@ -10,14 +10,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-internal val Ink = Color(0xFF0D1018)
-internal val Surface = Color(0xFF191E2B)
-internal val Surface2 = Color(0xFF293142)
+internal val Ink = Color(0xFF06080E)
+internal val Surface = Color(0xFF121620)
+internal val Surface2 = Color(0xFF212839)
 internal val Lime = Color(0xFFC7FF3C)
 internal val Blue = Color(0xFF314CFF)
 internal val Coral = Color(0xFFFF7958)
 internal val Soft = Color(0xFFA8B2C7)
 internal val White = Color(0xFFF7F8FF)
+internal val NetLink = Color(0xFF6F86FF)
 
 internal object YapSpacing {
     val gutter = 24.dp

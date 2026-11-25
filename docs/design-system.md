@@ -54,3 +54,15 @@ Settings rows should lead to useful controls or honest explanations of unavailab
 6. Carry the same design language to iOS without copying Android-specific interaction patterns.
 
 This is a design specification, not a claim that these screens or secure features are already implemented.
+
+## Facelift, November 2026
+
+The user approved a refined direction that keeps the original identity (black, electric lime, cobalt, coral) and makes it more polished:
+
+- **Black base** (`#06080E`) with a faint lime glow, raised gradient cards with hairline borders, and per-friend avatar colours (lime, cobalt, coral, violet).
+- **A much larger wordmark** on Chats. The user supplied a new logo image to replace the typed one; it goes through the single `Wordmark` composable.
+- **No pills.** Filters are text tabs with a lime underline, status is plain text with a dot, buttons and the composer are rounded rectangles, and the navigation is a flat bar with a lime marker above the selected tab. Avoid chips and fully rounded buttons.
+- **Network screen:** a centred layout with rings around "You", solid lime local links and dashed periwinkle internet links. As before, show only verified connections; the sample network exists only in the labelled preview.
+- **Onboarding and profile:** first-run onboarding and a local profile (name and avatar colour, stored on the phone only and never sent to contacts).
+
+This supersedes the earlier mockup for look and feel. The rules about honest network state, receipts and sample data still apply.

@@ -2,12 +2,10 @@ package org.yapmessenger.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -44,27 +42,31 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                 IconButton(onClick = { search = !search; if (!search) query = "" }) { Icon(Icons.Default.Search, "Search chats", tint = White) }
                 IconButton(onClick = newChat) { Icon(Icons.Default.Add, "Add a friend", tint = White) }
                 if (!preview) Box(Modifier.size(48.dp).clickable(onClickLabel = "Your profile", role = Role.Button, onClick = openProfile), contentAlignment = Alignment.Center) {
-                    YapAvatar(myName, size = 34, tint = myColour)
+                    YapAvatar(myName, size = 36, tint = myColour, shape = RoundedCornerShape(11.dp))
                 }
             }
-            if (!preview && link.isNotEmpty()) ConnectionPill(link, linkActive, openLink)
             if (search) OutlinedTextField(query, { query = it }, label = { Text("Search chats") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(20.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
                 listOf("All", "Groups", "Unread").forEach { label ->
-                    FilterChip(selected = filter == label, onClick = { filter = label },
-                        shape = CircleShape,
-                        border = null,
-                        label = { Text(if (label == "Unread" && chats.sumOf { it.unread } > 0) "Unread ${chats.sumOf { it.unread }}" else label) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Lime, selectedLabelColor = Ink),
-                        modifier = Modifier.widthIn(min = 72.dp))
+                    val on = filter == label
+                    val unread = chats.sumOf { it.unread }
+                    Column(Modifier.heightIn(min = 48.dp).selectable(on, role = Role.Tab, onClick = { filter = label }), verticalArrangement = Arrangement.Center) {
+                        Text(if (label == "Unread" && unread > 0) "Unread $unread" else label, style = MaterialTheme.typography.bodyLarge, color = if (on) Lime else Soft)
+                        Spacer(Modifier.height(6.dp))
+                        Box(Modifier.height(2.dp).width(28.dp).background(if (on) Lime else Color.Transparent))
+                    }
+                }
+                if (!preview && link.isNotEmpty()) {
+                    Spacer(Modifier.weight(1f))
+                    ConnectionStatus(link, linkActive, openLink)
                 }
             }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = Surface2)
             if (pairFirst) {
                 Spacer(Modifier.height(24.dp))
-                Column(Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(20.dp)).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.fillMaxWidth().yapCard(18.dp).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.PersonAdd, null, tint = Lime, modifier = Modifier.size(40.dp))
                     Spacer(Modifier.height(12.dp))
                     Text("Add your first friend", color = White, style = MaterialTheme.typography.titleLarge)
@@ -76,7 +78,7 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
             }
         }
         items(visible, key = { it.id }) { chat ->
-            Row(Modifier.fillMaxWidth().clickable { open(chat.id) }.padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp).yapCard(18.dp).clickable { open(chat.id) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 YapAvatar(chat.name.takeIf { preview || chat.id.startsWith("secure:") } ?: "", chat.group)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
@@ -89,13 +91,12 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                     if (chat.time.isNotEmpty()) Text(chat.time, style = MaterialTheme.typography.labelSmall, color = Soft)
                     if (chat.unread > 0) {
                         Spacer(Modifier.height(8.dp))
-                        Box(Modifier.background(Blue, CircleShape).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                        Box(Modifier.background(Blue, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp)) {
                             Text(chat.unread.toString(), style = MaterialTheme.typography.labelMedium, color = White)
                         }
                     }
                 }
             }
-            HorizontalDivider(color = Surface2.copy(alpha = .55f), modifier = Modifier.padding(start = 66.dp))
         }
         if (visible.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(vertical = 48.dp)) {

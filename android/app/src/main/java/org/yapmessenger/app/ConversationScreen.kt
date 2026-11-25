@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -32,7 +33,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = White) }
-            YapAvatar(if (preview || secure) chat.name else "", chat.group, 40)
+            YapAvatar(if (preview || secure) chat.name else "", chat.group, 42)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).then(if (chat.group) Modifier.clickable(onClickLabel = "Group details", onClick = group) else Modifier)) {
                 Text(chat.name, color = White, style = MaterialTheme.typography.titleMedium)
@@ -52,8 +53,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Today", color = Soft, style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.background(Surface, RoundedCornerShape(20.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                    Text("TODAY", color = Soft, style = MaterialTheme.typography.labelMedium)
                 }
             }
             if (messages.isEmpty()) item {
@@ -81,9 +81,10 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
 private fun MessageBubble(message: ChatMessage, details: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (message.mine) Alignment.End else Alignment.Start) {
         val file = message.fileName != null
-        Column(Modifier.widthIn(max = 290.dp).background(if (file) Blue else if (message.mine) Lime else Surface,
-            RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (message.mine) 18.dp else 5.dp,
-                bottomEnd = if (message.mine) 5.dp else 18.dp))
+        val bubble = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (message.mine) 18.dp else 5.dp, bottomEnd = if (message.mine) 5.dp else 18.dp)
+        val look = if (file) Modifier.clip(bubble).background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(androidx.compose.ui.graphics.Color(0xFF4A63FF), androidx.compose.ui.graphics.Color(0xFF2238D6))), bubble)
+            else if (message.mine) Modifier.clip(bubble).background(LimeBrush, bubble) else Modifier.yapSurface(bubble)
+        Column(Modifier.widthIn(max = 290.dp).then(look)
             .clickable(onClickLabel = "Message details", role = Role.Button, onClick = details)
             .padding(horizontal = 14.dp, vertical = 12.dp)) {
             if (file) {
@@ -109,7 +110,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextField(value = draft, onValueChange = onDraft, enabled = enabled, placeholder = { Text("Message") },
-                singleLine = maxBytes == 20, maxLines = if (maxBytes == 20) 1 else 4, isError = bytes > maxBytes, shape = RoundedCornerShape(28.dp),
+                singleLine = maxBytes == 20, maxLines = if (maxBytes == 20) 1 else 4, isError = bytes > maxBytes, shape = RoundedCornerShape(16.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { if (canSend) send() }),
                 colors = TextFieldDefaults.colors(focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                     unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -117,7 +118,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
                     errorIndicatorColor = Coral, focusedContainerColor = Surface, unfocusedContainerColor = Surface,
                     disabledContainerColor = Surface, errorContainerColor = Surface, cursorColor = Lime),
                 modifier = Modifier.weight(1f))
-            FilledIconButton(onClick = send, enabled = canSend, modifier = Modifier.size(48.dp)) {
+            FilledIconButton(onClick = send, enabled = canSend, modifier = Modifier.size(52.dp), shape = RoundedCornerShape(16.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
         }
