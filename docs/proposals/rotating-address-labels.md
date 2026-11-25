@@ -95,7 +95,7 @@ after decryption.
 2. Hour-long epochs: shorter means less linkability but a bigger match table and
    more sensitivity to clock skew. Clocks are already required to be within 5
    minutes for envelopes to be accepted.
-3. A contact's phone being seized reveals `labelKey`, so past and future labels for
+3. If someone gets hold of a contact's phone, it reveals `labelKey`, so past and future labels for
    that pair become linkable. Consider rotating `labelKey` with the Signal session.
 4. Groups (not built yet) will need their own label scheme.
 5. Migration: dev builds only, so a version bump and re-pairing is acceptable.
