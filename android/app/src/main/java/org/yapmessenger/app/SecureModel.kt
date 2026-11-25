@@ -62,6 +62,8 @@ internal class SecureModel(private val application: Application) {
     var busy by mutableStateOf(false); private set
     var meshEnabled by mutableStateOf(false); private set
     var localPeers by mutableStateOf(0); private set
+    /** What carries each nearby link, so screens can say Bluetooth, Wi-Fi Aware or Wi-Fi Direct. */
+    var localLinks by mutableStateOf(emptyList<MeshLink>()); private set
     var meshDiscoverable by mutableStateOf(false); private set
     var internetConnected by mutableStateOf(false); private set
     var relayUrl by mutableStateOf(""); private set
@@ -117,7 +119,8 @@ internal class SecureModel(private val application: Application) {
     private var relayFailures = 0
     private val radio = LocalMesh(application,
         report = { say(it) }, changed = { count -> main.post { localPeers = count } },
-        visibility = { visible -> main.post { meshDiscoverable = visible } }, record = ::localRecord)
+        visibility = { visible -> main.post { meshDiscoverable = visible } }, record = ::localRecord,
+        links = { links -> main.post { localLinks = links } })
     private val internet = InternetRelay(
         status = { connected, message -> main.post { internetConnected = connected; status = message } },
         incoming = { bytes, key, acknowledge -> receive("internet-relay", bytes, key) { acknowledge() } },
@@ -197,7 +200,7 @@ internal class SecureModel(private val application: Application) {
         }
         if (value) submit(silent = true) { if (initialized) resumeConfigured() }
     }
-    private fun stopTransports() { radio.stop(); internet.stop(); main.post { localPeers = 0; internetConnected = false } }
+    private fun stopTransports() { radio.stop(); internet.stop(); main.post { localPeers = 0; localLinks = emptyList(); internetConnected = false } }
     private fun resumeConfigured() = synchronized(lifecycleLock) {
         if (!active) return@synchronized
         if (repository.settings().optBoolean("mesh")) radio.start(bluetoothAllowed = permissions(), proximityWifiAllowed = proximityWifiPermission())

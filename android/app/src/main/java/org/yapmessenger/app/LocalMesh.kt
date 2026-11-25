@@ -14,10 +14,12 @@ internal class LocalMesh(
     report: (String) -> Unit,
     changed: (Int) -> Unit,
     visibility: (Boolean) -> Unit,
-    record: (MeshHub.Peer, Int, ByteArray) -> Unit
+    record: (MeshHub.Peer, Int, ByteArray) -> Unit,
+    /** What carries each current link (Bluetooth, Wi-Fi Aware, ...), for display. */
+    links: (List<MeshLink>) -> Unit = {}
 ) {
-    private val hub: MeshHub = MeshHub(report, { count -> MeshLog.i("links now $count: ${linkSummary()}"); changed(count) }, record, trace = { MeshLog.i(it) })
-    private fun linkSummary(): String = runCatching { hub.connections().groupingBy { it.transport }.eachCount().toString() }.getOrDefault("?")
+    private val hub: MeshHub = MeshHub(report, { count -> MeshLog.i("links now $count: ${linkSummary()}"); changed(count); links(hub.connections().map { it.link }) }, record, trace = { MeshLog.i(it) })
+    private fun linkSummary(): String = runCatching { hub.connections().groupingBy { it.link.label }.eachCount().toString() }.getOrDefault("?")
     @Volatile private var bluetoothVisible = false
     @Volatile private var wifiOn = false
     private val show = visibility

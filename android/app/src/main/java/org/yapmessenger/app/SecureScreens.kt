@@ -193,7 +193,8 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
     Column(Modifier.fillMaxSize()) {
         PageHeader("Connections", back)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            DetailRow("Nearby messaging", "${model.localPeers} nearby phone(s) connected", Icons.Default.Hub)
+            val byRadio = model.localLinks.groupingBy { it.label }.eachCount().entries.joinToString(", ") { "${it.value} ${it.key}" }
+            DetailRow("Nearby messaging", "${model.localPeers} nearby phone(s) connected" + if (byRadio.isNotEmpty() && model.localLinks.size == model.localPeers) " · $byRadio" else "", Icons.Default.Hub)
             Text("Sends encrypted messages to phones in range over Bluetooth and Wi-Fi while Yap is open. No internet, router or hotspot needed. Queued messages survive a restart.", color = Soft)
             Button(onClick = enableMesh, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text(if (model.meshEnabled) "Restart nearby messaging" else "Turn on nearby messaging")

@@ -301,7 +301,7 @@ internal class MeshWifiAware(
                         val socket = network.socketFactory.createSocket(address, port)
                         socket.tcpNoDelay = true; socket.keepAlive = true
                         val closer = Closeable { runCatching { socket.close() }; release() }
-                        hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, address.hostAddress), MeshTransport.WIFI, outbound = true)
+                        hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, address.hostAddress), MeshTransport.WIFI, outbound = true, link = MeshLink.WIFI_AWARE)
                         MeshLog.i("aware: initiator socket connected")
                     } catch (e: Exception) { MeshLog.i("aware: initiator socket failed ${e.javaClass.simpleName}"); release() }
                 }
@@ -360,7 +360,7 @@ internal class MeshWifiAware(
                 runCatching { server.close() }
                 socket.tcpNoDelay = true; socket.keepAlive = true
                 val closer = Closeable { runCatching { socket.close() }; release() }
-                hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, socket.inetAddress?.hostAddress), MeshTransport.WIFI, outbound = false)
+                hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, socket.inetAddress?.hostAddress), MeshTransport.WIFI, outbound = false, link = MeshLink.WIFI_AWARE)
                 MeshLog.i("aware: responder accepted socket")
             } catch (e: Exception) { MeshLog.i("aware: responder accept failed ${e.javaClass.simpleName}"); release() }
         }
