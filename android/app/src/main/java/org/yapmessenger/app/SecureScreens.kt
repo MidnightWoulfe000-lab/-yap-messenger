@@ -85,10 +85,10 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
             if (offer != null) {
                 PairingQr(offer.qr)
                 if (reserved) {
-                    Text("Someone has scanned this code. Finishing up…", color = Soft, style = MaterialTheme.typography.bodySmall)
+                    Text("Your code is linked to your new friend. Now they need to scan it too.", color = Soft, style = MaterialTheme.typography.bodySmall)
                 } else {
                     LinearProgressIndicator(progress = { remaining / CODE_LIFETIME_MS.toFloat() }, color = Lime, trackColor = Surface2,
-                        modifier = Modifier.width(264.dp).height(4.dp).clip(RoundedCornerShape(2.dp)))
+                        modifier = Modifier.fillMaxWidth().widthIn(max = 340.dp).height(4.dp).clip(RoundedCornerShape(2.dp)))
                     Text("New code in ${(remaining + 999) / 1000}s", color = Soft, style = MaterialTheme.typography.bodySmall)
                 }
             } else {
@@ -101,6 +101,14 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
             }
             Text("Then both phones show matching fingerprints. Confirm they match and you are connected.", color = Soft,
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+            if (model.searching) Row(Modifier.fillMaxWidth().yapCard(14.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(24.dp), color = Lime, strokeWidth = 2.dp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Looking for their phone", color = White, style = MaterialTheme.typography.titleMedium)
+                    Text("Keep both phones close with Yap open on both.", color = Soft, style = MaterialTheme.typography.bodySmall)
+                }
+            }
             added.forEach { contact ->
                 Row(Modifier.fillMaxWidth().yapCard(14.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (contact.ready) Icon(Icons.Default.CheckCircle, null, tint = Lime) else CircularProgressIndicator(Modifier.size(24.dp), color = Lime, strokeWidth = 2.dp)
@@ -137,12 +145,12 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
 private fun PairingQr(value: String) {
     val grid = remember(value) {
         val m = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, 1, 1,
-            mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.Q, EncodeHintType.MARGIN to 0))
+            mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M, EncodeHintType.MARGIN to 0))
         Array(m.height) { y -> BooleanArray(m.width) { x -> m[x, y] } }
     }
     val ink = Lime
     Crossfade(grid, animationSpec = tween(250), label = "code") { g ->
-        Canvas(Modifier.size(264.dp).clip(RoundedCornerShape(28.dp)).background(Ink)
+        Canvas(Modifier.fillMaxWidth().widthIn(max = 340.dp).aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Ink)
             .semantics { contentDescription = "Your Yap pairing code. It changes every minute." }) {
             val n = g.size
             val cell = size.width / (n + 4)
