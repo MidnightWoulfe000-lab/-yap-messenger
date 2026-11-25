@@ -154,12 +154,15 @@ internal fun ProfileScreen(store: ProfileStore, fingerprint: String, addFriend: 
     }
 }
 
-/** Plain status line for the Chats header. [label] reflects only what the transport layer reports. */
+/** Plain status line shown beside the Chats filters. [label] reflects only what the transport layer reports. */
 @Composable
 internal fun ConnectionStatus(label: String, active: Boolean, onClick: () -> Unit) {
-    Row(Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "Connections", role = Role.Button, onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(if (active) Lime else Soft, CircleShape))
-        Spacer(Modifier.width(8.dp))
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = if (active) Lime else Soft)
+    Column(Modifier.heightIn(min = 48.dp).clickable(onClickLabel = "Connections", role = Role.Button, onClick = onClick), verticalArrangement = Arrangement.Center) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).background(if (active) Lime else Soft, CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = if (active) Lime else Soft, maxLines = 1)
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }

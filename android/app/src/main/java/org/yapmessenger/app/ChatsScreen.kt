@@ -45,10 +45,9 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                     YapAvatar(myName, size = 36, tint = myColour, shape = RoundedCornerShape(11.dp))
                 }
             }
-            if (!preview && link.isNotEmpty()) ConnectionStatus(link, linkActive, openLink)
             if (search) OutlinedTextField(query, { query = it }, label = { Text("Search chats") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
                 listOf("All", "Groups", "Unread").forEach { label ->
                     val on = filter == label
                     val unread = chats.sumOf { it.unread }
@@ -57,6 +56,10 @@ internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (Stri
                         Spacer(Modifier.height(6.dp))
                         Box(Modifier.height(2.dp).width(28.dp).background(if (on) Lime else Color.Transparent))
                     }
+                }
+                if (!preview && link.isNotEmpty()) {
+                    Spacer(Modifier.weight(1f))
+                    ConnectionStatus(link, linkActive, openLink)
                 }
             }
             Spacer(Modifier.height(12.dp))
