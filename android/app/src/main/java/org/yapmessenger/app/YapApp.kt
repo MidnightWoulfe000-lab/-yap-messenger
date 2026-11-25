@@ -112,7 +112,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                 "connections" -> if (preview || controlsBack == "conversation" && secureId == null) ConnectionScreen(session, preview, discover, back = { back() })
                     else SecureConnectionsScreen(secure, discoverMesh, legacy = { legacy() }, back = { back() })
                 "legacy_connections" -> ConnectionScreen(session, preview, discover, back = { back() })
-                "pairing" -> PairingScreen(secure, scan, share, profile.name, back = { back() })
+                "pairing" -> PairingScreen(secure, scan, share, discoverMesh, profile.name, back = { back() })
                 "profile" -> ProfileScreen(profile, secure.snapshot.identity, addFriend = { pair() }, back = { back() })
                 "contact_identity" -> SecureContactScreen(secureContact, secure, share, back = { back() })
                 "licences" -> MessagingLicencesScreen(back = { back() })
