@@ -85,6 +85,32 @@ route) to every phone that connected. v2:
 
 Pasting a full pairing package (QR + bundle) still works, unchanged.
 
+## Multi-hop (store and forward)
+
+How it works (unchanged from v1, now over both transports): the sender offers each
+envelope to every nearby link and keeps it in its outbox until the recipient's
+encrypted receipt arrives. A phone that is not the recipient stores the envelope in
+its native relay database (`core/src/relay.rs`, up to 24 h, 1024 envelopes / 8 MB)
+and offers it to its other links, one hop count used per forward (max 8). When the
+next phone durably stores it and replies with ACK, the relay releases its copy. The
+receipt returns the same way.
+
+**Rotation side effect, fixed:** the relay excludes "the link it came from" by link
+token. With rotating IDs, a relay could hand an envelope back to its own sender
+after a rotation. `SecureModel` now remembers the relay keys of envelopes it sent
+itself (`ownKeys`) and, if one comes back, accepts it off the relay's hands without
+storing a relay copy (its outbox is already retrying). Between two relays a bounce
+after rotation is harmless: the original relay's 10-minute recent cache refuses it.
+
+**Limits:**
+- Relaying only happens while Yap is open on screen on the relaying phone. Nearby
+  messaging stops when the app goes to the background. A background service is the
+  next big step for real multi-hop use; it needs care with battery and Android's
+  background limits.
+- The core A→B→C path is covered by the Rust test
+  `custody_survives_restart_and_a_b_c_forwarding_keeps_payload_identical`. It has
+  **never been tested on three real phones.**
+
 ## What is still permanent (not fixed here, needs a spec)
 
 The **envelope header** still carries the recipient's permanent route token

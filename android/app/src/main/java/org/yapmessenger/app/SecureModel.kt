@@ -82,6 +82,14 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
      * Keyed by contact route; the route is never sent over the link to find them.
      */
     private val pairingLinks = HashMap<String, MeshHub.Peer>()
+    /**
+     * Relay keys of envelopes this phone sent itself (worker thread only). Link IDs
+     * rotate, so a relay can no longer tell that we were the source and may hand our
+     * own message back. We then take it off their hands without storing a relay copy:
+     * our outbox already keeps retrying it. Without this, messages could bounce back
+     * to the sender and waste hops.
+     */
+    private val ownKeys = LinkedHashSet<String>()
     private var nextRelayAttempt = 0L
     private var relayFailures = 0
     private val radio = LocalMesh(application,
@@ -253,6 +261,9 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         submit(silent = true) {
             if (!foreground || !initialized) return@submit
             val local = decodeToken(publicState.route)
+            if (!bytes.copyOfRange(20, 36).contentEquals(local) && source != "internet-relay" && encodeToken(envelopeKey(bytes)) in ownKeys) {
+                ack(); return@submit
+            }
             val data = if (bytes.copyOfRange(20, 36).contentEquals(local)) call("receive", JSONObject().put("bytes", encodeToken(bytes)))
                 else relay("relay_admit", JSONObject().put("bytes", encodeToken(bytes)).put("peer", sourceToken(source)))
             val key = data.optString("custody")
@@ -327,6 +338,8 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
                 if (packet.getString("kind") == "confirmation") linkFor(packet.getString("destination"))?.send(MeshFrames.CONFIRM, raw)
                 else {
                     val key = packet.getString("key")
+                    ownKeys.remove(key); ownKeys.add(key)
+                    while (ownKeys.size > 2048) ownKeys.remove(ownKeys.first())
                     local.forEach { it.send(MeshFrames.ENVELOPE, raw, key) }
                     if (internet.connected) internet.offer(raw, key)
                 }
