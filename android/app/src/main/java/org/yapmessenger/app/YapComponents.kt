@@ -18,13 +18,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -47,13 +44,11 @@ internal fun Modifier.yapCard(radius: Dp = 18.dp): Modifier = yapSurface(Rounded
 
 internal val LimeBrush = Brush.linearGradient(listOf(Color(0xFFD8FF63), Color(0xFFB6F21F)))
 
+/** The Yap logo. Every screen uses this one composable, so a new logo is a single file swap. */
 @Composable
-internal fun Wordmark(size: TextUnit = 72.sp) {
-    Row(verticalAlignment = Alignment.Bottom) {
-        Text("yap", fontSize = size, fontWeight = FontWeight.Black, letterSpacing = (-4).sp, color = White, lineHeight = size)
-        Text(".", fontSize = size, fontWeight = FontWeight.Black, lineHeight = size, color = Lime,
-            style = TextStyle(shadow = Shadow(Lime.copy(alpha = .6f), blurRadius = 36f)))
-    }
+internal fun Wordmark(height: Dp = 64.dp) {
+    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.drawable.yap_logo), contentDescription = "Yap",
+        modifier = Modifier.height(height), contentScale = androidx.compose.ui.layout.ContentScale.Fit, alignment = Alignment.CenterStart)
 }
 
 @Composable
