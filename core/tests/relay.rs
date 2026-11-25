@@ -41,6 +41,7 @@ fn config() -> RelayConfig {
             bytes: 2_000_000,
         },
         max_future_skew_ms: 0,
+        evict_oldest_when_full: false,
     }
 }
 fn clock(start: Instant, elapsed_ms: u64) -> Clock {
@@ -190,6 +191,64 @@ fn full_queue_rejection_does_not_mark_the_rejected_copy_seen() {
     );
     relay.transfer_custody(first, now).unwrap();
     stored(relay.admit(&second, [1; 16], now).unwrap());
+}
+
+#[test]
+fn carrier_store_evicts_oldest_when_full() {
+    let file = File::new();
+    let start = Instant::now();
+    let mut limits = config();
+    limits.queue_envelopes = 3;
+    limits.evict_oldest_when_full = true;
+    let mut relay = Relay::open(&file.0, limits, clock(start, 0)).unwrap();
+    for id in 1..=3u8 {
+        stored(
+            relay
+                .admit(&envelope(id, b"carried").encode(), [1; 16], clock(start, u64::from(id)))
+                .unwrap(),
+        );
+    }
+    // A fourth envelope is accepted; the oldest (1) is deleted to make room.
+    stored(
+        relay
+            .admit(&envelope(4, b"newest").encode(), [1; 16], clock(start, 10))
+            .unwrap(),
+    );
+    assert_eq!(relay.queued_count().unwrap(), 3);
+    let ids: Vec<u8> = relay
+        .pending_for([9; 16], clock(start, 11), 16)
+        .unwrap()
+        .iter()
+        .map(|f| f.envelope.header().id[0])
+        .collect();
+    assert_eq!(ids, vec![2, 3, 4]);
+}
+
+#[test]
+fn carrier_store_evicts_by_bytes_and_still_rejects_oversized() {
+    let file = File::new();
+    let start = Instant::now();
+    let one = envelope(1, &[7; 1000]).encode().len();
+    let mut limits = config();
+    limits.queue_bytes = one * 2;
+    limits.evict_oldest_when_full = true;
+    let mut relay = Relay::open(&file.0, limits, clock(start, 0)).unwrap();
+    for id in 1..=3u8 {
+        stored(
+            relay
+                .admit(&envelope(id, &[7; 1000]).encode(), [1; 16], clock(start, u64::from(id)))
+                .unwrap(),
+        );
+    }
+    assert_eq!(relay.queued_count().unwrap(), 2);
+    // Larger than the whole store: rejected, nothing evicted for nothing.
+    assert_eq!(
+        relay
+            .admit(&envelope(9, &[7; 5000]).encode(), [1; 16], clock(start, 9))
+            .unwrap(),
+        Admission::Rejected(Reject::QueueFull)
+    );
+    assert_eq!(relay.queued_count().unwrap(), 2);
 }
 
 #[test]

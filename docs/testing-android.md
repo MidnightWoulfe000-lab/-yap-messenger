@@ -34,6 +34,10 @@ This tests the paired, encrypted chat (not the legacy Bluetooth chat). See [loca
 7. **Mixed:** turn Bluetooth on as well. There must still be one link per phone (nearby count 1), not two.
 8. **Privacy check (optional, technical):** with a network scanner such as an mDNS browser app, the service name should be `yap-` plus 32 hex characters and change after each restart or rotation.
 
+9. **Background:** with nearby messaging on, press Home and lock both phones. A "Nearby messaging is on" notification should stay in the notification shade (not on the lock screen). Send from a third phone or unlock one to send; the locked receiver should show a generic "New message" alert with no name or text. Tap **Pause** in the notification and confirm nearby messaging turns off.
+10. **Carrier hop in the background:** put phone B (carrier) locked in a pocket between A and C, where A and C cannot reach each other. A message from A should reach C.
+11. **Killed app:** swipe Yap away from Recents with nearby messaging on. The notification should remain or return shortly and messaging should resume. Note the phone make if it does not: some manufacturers kill background apps.
+
 Record phone models, Android versions and the network type (home router, public Wi-Fi, hotspot) for any failure.
 
 ## Compose interface checks

@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Wi-Fi nearby messaging: find the hotspot gateway. No runtime prompt. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Background nearby messaging (MeshService). CHANGE_NETWORK_STATE is install-time and
+         satisfies Android 14's connectedDevice rule even if Bluetooth permission is refused. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
@@ -25,5 +32,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".MeshService" android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

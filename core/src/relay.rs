@@ -32,6 +32,11 @@ pub struct RelayConfig {
     pub per_connection: Budget,
     pub global: Budget,
     pub max_future_skew_ms: u64,
+    /// When full, delete the oldest carried envelopes to make room instead of
+    /// rejecting new ones. For phones acting as carriers: their custody is
+    /// best-effort and the original sender keeps retrying until a receipt. Keep
+    /// this false for relays that promise custody (the internet relay server).
+    pub evict_oldest_when_full: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -106,6 +111,20 @@ pub struct Relay {
 
 fn invalid(message: &'static str) -> Box<dyn Error + Send + Sync> {
     io::Error::new(io::ErrorKind::InvalidData, message).into()
+}
+
+/// Cheap view of a stored record without copying or decoding the envelope:
+/// (accepted_ms, source, expires_ms, encoded envelope length). Used by scans
+/// that run on every operation, so a 10,000-envelope carrier store stays fast.
+fn peek_stored(value: &[u8]) -> StoreResult<(u64, Token, u64, usize)> {
+    // Envelope header: expires_ms is at bytes 60..68 of the encoded envelope.
+    if value.len() <= STORED_PREFIX + 73 || value.len() > STORED_PREFIX + MAX_ENVELOPE_BYTES {
+        return Err(invalid("invalid stored relay record length"));
+    }
+    let accepted = u64::from_be_bytes(value[..8].try_into().unwrap());
+    let source = value[8..24].try_into().unwrap();
+    let expires = u64::from_be_bytes(value[STORED_PREFIX + 60..STORED_PREFIX + 68].try_into().unwrap());
+    Ok((accepted, source, expires, value.len() - STORED_PREFIX))
 }
 
 fn parse_stored(value: &[u8]) -> StoreResult<(u64, Token, Envelope)> {
@@ -215,8 +234,8 @@ impl Relay {
         let mut expired = Vec::new();
         for row in queue.iter()? {
             let (key, value) = row?;
-            let (accepted, _, envelope) = parse_stored(value.value())?;
-            if envelope.header().expires_ms <= clock.unix_ms
+            let (accepted, _, expires_ms, _) = peek_stored(value.value())?;
+            if expires_ms <= clock.unix_ms
                 || Duration::from_millis(clock.unix_ms.saturating_sub(accepted))
                     >= self.config.max_residence
             {
@@ -306,12 +325,36 @@ impl Relay {
                 admission = Admission::RecentlyForwarded;
             } else {
                 let mut used = 0usize;
+                let mut rows = Vec::new();
                 for row in queue.iter()? {
-                    used += row?.1.value().len() - STORED_PREFIX;
+                    let (key, value) = row?;
+                    let (accepted, _, _, length) = peek_stored(value.value())?;
+                    used += length;
+                    if self.config.evict_oldest_when_full {
+                        rows.push((accepted, key.value().to_vec(), length));
+                    }
                 }
-                if queue.len()? >= self.config.queue_envelopes as u64
-                    || bytes.len() > self.config.queue_bytes.saturating_sub(used)
+                let mut count = queue.len()? as usize;
+                let full = |count: usize, used: usize| {
+                    count >= self.config.queue_envelopes
+                        || bytes.len() > self.config.queue_bytes.saturating_sub(used)
+                };
+                if full(count, used)
+                    && self.config.evict_oldest_when_full
+                    && bytes.len() <= self.config.queue_bytes
                 {
+                    // Oldest first (ties broken by key so the order is stable).
+                    rows.sort();
+                    for (_, key, length) in rows {
+                        if !full(count, used) {
+                            break;
+                        }
+                        queue.remove(key.as_slice())?;
+                        count -= 1;
+                        used -= length;
+                    }
+                }
+                if full(count, used) {
                     admission = Admission::Rejected(Reject::QueueFull);
                 } else {
                     let mut stored = Vec::with_capacity(STORED_PREFIX + bytes.len());
@@ -337,29 +380,28 @@ impl Relay {
         self.prune(clock)?;
         let transaction = self.database.begin_read()?;
         let queue = transaction.open_table(QUEUE)?;
-        let mut candidates = Vec::new();
+        // Order cheaply first, then decode only the envelopes actually returned.
+        let mut order: Vec<(u64, RelayKey)> = Vec::new();
         for row in queue.iter()? {
             let (key, value) = row?;
-            let (accepted, source, envelope) = parse_stored(value.value())?;
-            if source == peer {
-                continue;
-            }
-            if let Some(envelope) = envelope.forwarded() {
-                candidates.push((
-                    accepted,
-                    Forward {
-                        key: key.value().try_into().unwrap(),
-                        envelope,
-                    },
-                ));
+            let (accepted, source, _, _) = peek_stored(value.value())?;
+            if source != peer {
+                order.push((accepted, key.value().try_into().unwrap()));
             }
         }
-        candidates.sort_by_key(|(accepted, forward)| (*accepted, forward.key));
-        Ok(candidates
-            .into_iter()
-            .take(limit)
-            .map(|(_, forward)| forward)
-            .collect())
+        order.sort();
+        let mut result = Vec::new();
+        for (_, key) in order {
+            if result.len() >= limit {
+                break;
+            }
+            let Some(value) = queue.get(key.as_slice())? else { continue };
+            let (_, _, envelope) = parse_stored(value.value())?;
+            if let Some(envelope) = envelope.forwarded() {
+                result.push(Forward { key, envelope });
+            }
+        }
+        Ok(result)
     }
 
     /// Release RELAY custody after a next-link DURABLE custody acknowledgement.

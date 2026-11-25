@@ -60,6 +60,8 @@ fn main() -> StoreResult<()> {
                 bytes: config.global_bytes_per_minute,
             },
             max_future_skew_ms: config.max_future_skew_ms,
+            // The server promises custody to senders, so it rejects when full.
+            evict_oldest_when_full: false,
         },
         clock()?,
     )?;

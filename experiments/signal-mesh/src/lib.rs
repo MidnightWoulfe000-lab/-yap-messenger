@@ -327,6 +327,7 @@ mod tests {
                     bytes: 524_288,
                 },
                 max_future_skew_ms: 0,
+                evict_oldest_when_full: false,
             };
             let clock = Clock {
                 unix_ms,

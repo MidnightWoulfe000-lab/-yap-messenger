@@ -16,7 +16,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 class MainActivity : ComponentActivity() {
     private lateinit var bluetooth: YapBluetooth
     private val session by lazy { ViewModelProvider(this)[ChatSession::class.java] }
-    private val secure by lazy { ViewModelProvider(this)[SecureModel::class.java] }
+    private val secure by lazy { SecureModel.get(application) }
     private val scan = registerForActivityResult(ScanContract()) { result -> result.contents?.let { secure.scannedQr = it } }
     private var permissionAction: (() -> Unit)? = null
     private var acceptsBluetoothUpdates = false
@@ -53,10 +53,13 @@ class MainActivity : ComponentActivity() {
 
     private var permissionOptional = false
     private fun withBluetoothPermissions(optional: Boolean = false, action: () -> Unit) {
-        val permissions = if (Build.VERSION.SDK_INT >= 31) arrayOf(
+        val bluetooth = if (Build.VERSION.SDK_INT >= 31) arrayOf(
             Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
             Manifest.permission.BLUETOOTH_ADVERTISE
         ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        // Nearby messaging also asks to show notifications (Android 13+) so new messages
+        // can be announced while Yap runs in the background. Optional, like Bluetooth.
+        val permissions = if (optional && Build.VERSION.SDK_INT >= 33) bluetooth + Manifest.permission.POST_NOTIFICATIONS else bluetooth
         val missing = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) action() else {
             permissionAction = action; permissionOptional = optional
@@ -70,7 +73,8 @@ class MainActivity : ComponentActivity() {
         if (requestCode == 100) {
             val action = permissionAction
             permissionAction = null
-            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) action?.invoke()
+            val bluetoothGranted = permissions.indices.all { permissions[it] == Manifest.permission.POST_NOTIFICATIONS || grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED }
+            if (grantResults.isNotEmpty() && bluetoothGranted) action?.invoke()
             else if (permissionOptional) action?.invoke() // continue with Wi-Fi only
             else session.status = "Bluetooth permission is needed. Allow the requested permissions and try again."
         }

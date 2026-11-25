@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import androidx.compose.runtime.*
-import androidx.lifecycle.AndroidViewModel
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -47,7 +46,16 @@ private object EndpointAdmission {
     }
 }
 
-internal class SecureModel(application: Application) : AndroidViewModel(application) {
+/**
+ * Messaging runtime. One instance per process ([get]), not tied to an Activity, so
+ * nearby messaging can keep running in the background under [MeshService].
+ */
+internal class SecureModel(private val application: Application) {
+    companion object {
+        @Volatile private var instance: SecureModel? = null
+        fun get(application: Application): SecureModel =
+            instance ?: synchronized(this) { instance ?: SecureModel(application).also { instance = it } }
+    }
     var snapshot by mutableStateOf(SecureSnapshot()); private set
     var status by mutableStateOf("Opening protected identity…"); private set
     var locked by mutableStateOf(false); private set
@@ -63,6 +71,10 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
     var scannedQr by mutableStateOf("")
     @Volatile private var publicState = SecureSnapshot()
     @Volatile private var foreground = false
+    /** True while [MeshService] keeps nearby messaging running with no screen open. */
+    @Volatile private var background = false
+    private val active get() = foreground || background
+    private var lastUnread = -1
     private val lifecycleLock = Any()
     @Volatile private var initialized = false
     private val closed = AtomicBoolean(false)
@@ -103,7 +115,7 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
     init {
         submit { openIdentity() }
         timer.scheduleAtFixedRate({
-            if (foreground && initialized && !closed.get() && pumping.compareAndSet(false, true)) {
+            if (active && initialized && !closed.get() && pumping.compareAndSet(false, true)) {
                 if (!submit(silent = true) { try { pump() } finally { pumping.set(false) } }) pumping.set(false)
             }
         }, 2, 3, TimeUnit.SECONDS)
@@ -137,6 +149,11 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         val offer = view.optJSONObject("offer")?.let { PairOffer(it.getString("qr"), it.getString("bundle"), it.getString("package"), it.getLong("expires"), it.getBoolean("reserved")) }
         val next = SecureSnapshot(view.getString("identity"), view.getString("route"), offer, contacts, history, view.getInt("queued"))
         publicState = next
+        // A new incoming message while no Yap screen is open: show a generic alert.
+        // Never the sender or the text: phones get seen and seized.
+        val unread = contacts.sumOf { it.unread }
+        if (lastUnread >= 0 && unread > lastUnread && !foreground) MeshService.notifyNewMessage(application)
+        lastUnread = unread
         main.post { if (!closed.get()) { snapshot = next; locked = false } }
     }
     private fun call(operation: String, args: JSONObject = JSONObject()): JSONObject {
@@ -148,31 +165,47 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         val settings = repository.settings()
         main.post { meshEnabled = settings.optBoolean("mesh"); relayUrl = settings.optString("relay_url"); relayConfigured = settings.optString("relay_url").isNotEmpty(); locked = false }
         say("Identity ready · experimental debug build")
-        if (foreground) resumeConfigured()
+        if (settings.optBoolean("mesh") && foreground) MeshService.start(application)
+        if (active) resumeConfigured()
     }
     fun reopen() { submit { openIdentity() } }
     fun setForeground(value: Boolean) {
         synchronized(lifecycleLock) {
             foreground = value
-            if (!value) { radio.stop(); internet.stop(); main.post { localPeers = 0; internetConnected = false }; return }
+            if (value) MeshService.clearNewMessage(application)
+            // With nearby messaging on, MeshService keeps everything running.
+            if (!value && !background) { stopTransports(); return }
         }
         submit(silent = true) { if (initialized) resumeConfigured() }
     }
+    /** Called by [MeshService] when it starts and stops. */
+    fun setBackground(value: Boolean) {
+        synchronized(lifecycleLock) {
+            background = value
+            if (!value && !foreground) { stopTransports(); return }
+        }
+        if (value) submit(silent = true) { if (initialized) resumeConfigured() }
+    }
+    private fun stopTransports() { radio.stop(); internet.stop(); main.post { localPeers = 0; internetConnected = false } }
     private fun resumeConfigured() = synchronized(lifecycleLock) {
-        if (!foreground) return@synchronized
+        if (!active) return@synchronized
         if (repository.settings().optBoolean("mesh")) radio.start(bluetoothAllowed = permissions())
         nextRelayAttempt = 0
     }
     private fun permissions(): Boolean {
         val required = if (Build.VERSION.SDK_INT >= 31) listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
             else listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        return required.all { getApplication<Application>().checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+        return required.all { application.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     }
     fun enableMesh() { submit {
         val settings = repository.settings().put("mesh", true); repository.saveSettings(settings)
-        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (foreground) { radio.stop(); radio.start(bluetoothAllowed = permissions()) } }
+        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (active) { radio.stop(); radio.start(bluetoothAllowed = permissions()) } }
+        if (foreground) MeshService.start(application)
     } }
-    fun disableMesh() { radio.stop(); submit { repository.saveSettings(repository.settings().put("mesh", false)); main.post { meshEnabled = false } } }
+    fun disableMesh() {
+        radio.stop(); MeshService.stop(application)
+        submit { repository.saveSettings(repository.settings().put("mesh", false)); main.post { meshEnabled = false } }
+    }
     // Offers are no longer broadcast to every nearby phone: a bundle contains the
     // permanent identity key. It is only sent to a phone that proves it scanned our QR.
     fun makeOffer() { submit { call("offer"); say("Fresh pairing code created. Both people must scan and confirm.") } }
@@ -235,7 +268,7 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
             finally { main.post { busy = false } }
         }) busy = false
     }
-    fun retry() { submit { if (foreground) pump(force = true); else say("Open Yap to retry saved messages") } }
+    fun retry() { submit { if (active) pump(force = true); else say("Open Yap to retry saved messages") } }
     fun retire(contact: String) { submit { call("retire", JSONObject().put("contact", contact)); say("Old session retired. Existing relay copies cannot be recalled.") } }
     fun clearHistory() { submit { call("clear_history"); say("Visible encrypted history cleared. Queued ciphertext and replay protection remain.") } }
     fun markRead(contact: String) { submit(silent = true) { call("mark_read", JSONObject().put("contact", contact)) } }
@@ -257,9 +290,9 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         call("ack", JSONObject().put("key", key)); relay("relay_ack", JSONObject().put("key", key))
     } }
     private fun receive(source: String, bytes: ByteArray, expectedKey: String?, ack: () -> Unit) {
-        if (!foreground || !initialized || bytes.size !in 74..65_536 || !EndpointAdmission.packet(source, bytes.size)) return
+        if (!active || !initialized || bytes.size !in 74..65_536 || !EndpointAdmission.packet(source, bytes.size)) return
         submit(silent = true) {
-            if (!foreground || !initialized) return@submit
+            if (!active || !initialized) return@submit
             val local = decodeToken(publicState.route)
             if (!bytes.copyOfRange(20, 36).contentEquals(local) && source != "internet-relay" && encodeToken(envelopeKey(bytes)) in ownKeys) {
                 ack(); return@submit
@@ -272,7 +305,7 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
     }
     private fun sourceToken(source: String): String = if (source == "internet-relay") encodeToken(MessageDigest.getInstance("SHA-256").digest(source.toByteArray()).copyOf(16)) else source
     private fun localRecord(peer: MeshHub.Peer, type: Int, bytes: ByteArray) {
-        if (!foreground || !initialized) return
+        if (!active || !initialized) return
         when (type) {
             MeshFrames.BUNDLE_REQUEST -> {
                 if (!EndpointAdmission.pairing.allow(bytes.size)) return
@@ -320,12 +353,12 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         return raw.copyOfRange(4, 20) + hash
     }
     private fun pump(force: Boolean = false) {
-        if (!foreground || !initialized || repository.locked) return
+        if (!active || !initialized || repository.locked) return
         val settings = repository.settings()
         val url = settings.optString("relay_url")
         if (url.isNotEmpty() && !internet.connected && SystemClock.elapsedRealtime() >= nextRelayAttempt) {
             nextRelayAttempt = SystemClock.elapsedRealtime() + (5_000L shl relayFailures.coerceAtMost(4)).coerceAtMost(60_000)
-            relayFailures++; synchronized(lifecycleLock) { if (foreground) internet.connect(url, settings.getString("relay_credential"), settings.optString("relay_ca")) }
+            relayFailures++; synchronized(lifecycleLock) { if (active) internet.connect(url, settings.getString("relay_credential"), settings.optString("relay_ca")) }
         }
         if (internet.connected) { relayFailures = 0; internet.poll() }
         val local = radio.connections()
@@ -355,8 +388,8 @@ internal class SecureModel(application: Application) : AndroidViewModel(applicat
         }
         val count = relay("relay_count").optInt("queued"); main.post { relayQueued = count }
     }
-    override fun onCleared() {
-        closed.set(true); foreground = false; radio.close(); internet.close(); timer.shutdownNow(); worker.shutdown()
-        super.onCleared()
+    /** Only for tests that create their own instance; the process-wide one lives until the process ends. */
+    fun close() {
+        closed.set(true); foreground = false; background = false; radio.close(); internet.close(); timer.shutdownNow(); worker.shutdown()
     }
 }

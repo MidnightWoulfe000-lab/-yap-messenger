@@ -76,8 +76,12 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
         let relay = Relay::open(
             path,
             RelayConfig {
-                queue_envelopes: 1024,
-                queue_bytes: 8 * 1024 * 1024,
+                // Carrier store: up to 10,000 envelopes (64 MiB cap, since one
+                // envelope can be up to 64 KiB). When full, the oldest carried
+                // envelopes are deleted to make room. The phone's own messages
+                // live in the separate encrypted endpoint snapshot, not here.
+                queue_envelopes: 10_000,
+                queue_bytes: 64 * 1024 * 1024,
                 recent_entries: 4096,
                 recent_lifetime: Duration::from_secs(600),
                 max_residence: Duration::from_secs(86_400),
@@ -92,6 +96,7 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
                     bytes: 1024 * 1024,
                 },
                 max_future_skew_ms: 300_000,
+                evict_oldest_when_full: true,
             },
             clock,
         )

@@ -103,13 +103,58 @@ storing a relay copy (its outbox is already retrying). Between two relays a boun
 after rotation is harmless: the original relay's 10-minute recent cache refuses it.
 
 **Limits:**
-- Relaying only happens while Yap is open on screen on the relaying phone. Nearby
-  messaging stops when the app goes to the background. A background service is the
-  next big step for real multi-hop use; it needs care with battery and Android's
-  background limits.
+- Carrier copies are single-custody: a relay deletes its copy once the next phone
+  acknowledges it. The owner raised the case where B hands to B2 and then meets C
+  first. Proposed fix: limited-copy routing ("spray and wait", around 8 copies),
+  **not yet built**; it needs a short routing plan first (`docs/SECURITY.md` lists
+  routing policy as needing a specification).
 - The core A→B→C path is covered by the Rust test
   `custody_survives_restart_and_a_b_c_forwarding_keeps_payload_identical`. It has
   **never been tested on three real phones.**
+
+## Background running (MeshService)
+
+Owner priority: messaging must keep working with the phone locked in a pocket.
+
+- `SecureModel` is now a process-wide runtime (`SecureModel.get(application)`), no
+  longer an Activity `ViewModel`, so it survives the screen closing.
+- `MeshService` is a foreground service (type `connectedDevice`) started whenever
+  nearby messaging is on and a Yap screen is visible (Android 12+ forbids starting
+  it from the background). It returns `START_STICKY`, so Android restarts it after
+  killing the process; the runtime then reopens the identity and resumes the mesh.
+- While it runs, `SecureModel.active` is true even with no screen, so receiving,
+  carrying and the 3-second outbox pump continue.
+- It holds a partial wake lock (renewed every 10 minutes) so the CPU keeps links and
+  retries moving with the screen off. **This costs battery.** Users stop it with
+  **Pause** in the notification or in Connections.
+- Notifications are generic and hidden on the lock screen (`VISIBILITY_SECRET`):
+  "Nearby messaging is on" and "New message". Never a name or text, because phones
+  are seen and seized. Turning on nearby messaging also asks for notification
+  permission on Android 13+; refusing it does not stop messaging.
+- Android 14 requires a matching permission for `connectedDevice`;
+  `CHANGE_NETWORK_STATE` (install-time) satisfies it even if Bluetooth is refused.
+- Known gaps: some manufacturers (Xiaomi, Huawei, Samsung and others) kill
+  background apps despite this; users may need to exempt Yap from battery
+  optimisation by hand. Not restarted after a phone reboot (no boot receiver yet).
+  Bluetooth scans continue with the screen off because they use a service filter.
+
+## Carrier storage (separate from the user's own messages)
+
+Owner decision: two separate stores.
+- **Your own messages** stay in the encrypted endpoint snapshot (`EndpointRepository`),
+  unchanged (still capped at 512 visible messages; see audit finding 5).
+- **Carried messages** for other people live in the native relay database. On phones
+  it now holds up to **10,000 envelopes** (also capped at 64 MiB, because one
+  envelope can be up to 64 KiB). When full, the **oldest** carried envelopes are
+  deleted to make room (`RelayConfig::evict_oldest_when_full`). The internet relay
+  server keeps rejecting when full, because it promises custody to senders.
+- Trade-off: a flood of junk pushes out real carried messages sooner. Limited-copy
+  routing and a proof-of-work stamp (both proposed, not built) reduce that.
+- Scans that run on every operation now read only record headers, so a full store
+  stays fast: about 2.5 ms per store and 5 ms per lookup on a development machine
+  with 10,000 entries. Phones will be slower; not yet measured on hardware.
+- Tests: `core/tests/relay.rs` `carrier_store_evicts_oldest_when_full`,
+  `carrier_store_evicts_by_bytes_and_still_rejects_oversized`.
 
 ## What is still permanent (not fixed here, needs a spec)
 

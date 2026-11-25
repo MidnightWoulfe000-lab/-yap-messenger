@@ -49,6 +49,7 @@ fn start(path: &Database, connections: usize, requests: u32) -> (u16, JoinHandle
                 bytes: 524_288,
             },
             max_future_skew_ms: 0,
+            evict_oldest_when_full: false,
         },
         clock().unwrap(),
     )
