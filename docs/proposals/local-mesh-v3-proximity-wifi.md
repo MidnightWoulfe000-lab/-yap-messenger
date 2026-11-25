@@ -26,17 +26,26 @@ messaging" switch are unchanged. The user sees no new controls.
 - Every phone publishes and subscribes to service `yapmesh`. The publish info is the
   16-byte rotating link ID and nothing else. Discovery restarts on every rotation.
 - Only the phone with the lower link ID initiates (same rule as the other transports).
-  It sends a short message to the publisher, which opens a `ServerSocket` and a data
-  path; the initiator connects to the peer's IPv6 address and port, then `MeshHub.attach`.
+  It sends HELLO; the publisher opens a `ServerSocket`, requests its side of the data
+  path, waits 1.5 s, then sends READY carrying the TCP port and the link mode. Only then
+  does the initiator request its side, connect to the peer's IPv6 address on that port,
+  then `MeshHub.attach`. Android only carries a port inside the data path for passphrase
+  links (`setPort()` on an open link makes `build()` throw), so the port is in READY.
 - Limits: at most 2 outgoing and 2 incoming setups at once (chips allow few data paths);
-  each setup times out after 30 s.
-- The data path is open (no passphrase). A passphrase in open-source code protects
-  nothing, and all envelopes are end-to-end encrypted. The link is unauthenticated,
-  exactly like Bluetooth and the v2 Wi-Fi link.
+  each setup times out after 30 s. Discovered peers are retried every 15 s.
+- Link mode (decided 2026-11-25): the data path is tried open first. Open data paths
+  failed between a Pixel 9 Pro XL and a Nothing Phone A063 until READY was delayed by
+  1.5 s. With the delay, an open link formed on the first attempt (tested 2026-11-25), so
+  the cause was the timing race. In case other phones refuse open links, after a failed
+  setup with a peer the publisher switches that peer to a passphrase link and alternates
+  until one works. The passphrase path has not yet been exercised on a real phone. The passphrase is a public constant in the source. It is **not** a
+  security measure and must never be described as one: it only satisfies phones that
+  will not make open links. All envelopes stay end-to-end encrypted, and the link is
+  unauthenticated, exactly like Bluetooth and the v2 Wi-Fi link.
 
 ### Wi-Fi Direct (`MeshWifiDirect.kt`), fallback for phones without Aware
-- Runs only when Aware is unsupported on the phone. If Aware is supported but fails to
-  attach, Direct does not take over (not decided; see open questions).
+- Runs when Aware is unsupported on the phone, or when Aware is supported but fails to
+  attach (seen on a Pixel 9 Pro XL).
 - DNS-SD service discovery with one TXT record, `n=yap-<link ID hex>`, re-published on
   rotation. The lower link ID calls `WifiP2pManager.connect`.
 - Once a group forms, the client dials the group owner on the existing `MeshWifi` port

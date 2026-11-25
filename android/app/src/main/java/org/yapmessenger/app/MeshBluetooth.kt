@@ -36,6 +36,8 @@ internal class MeshBluetooth(
         val METADATA: UUID = UUID.fromString("a6f0c9e1-5b2d-4f8e-9a17-3c6d0e2b4302")
         private const val VERSION: Byte = 2
         private const val METADATA_BYTES = 3 + MeshFrames.ID_BYTES
+        /** How long the higher link ID waits for the other phone to dial before dialling itself. */
+        private const val FALLBACK_DIAL_MS = 20_000L
     }
     private val manager = context.getSystemService(BluetoothManager::class.java)
     private val adapter get() = manager.adapter
@@ -50,8 +52,8 @@ internal class MeshBluetooth(
     private var scanner: BluetoothLeScanner? = null
     private var generation = 0
     private val advertising = object : AdvertiseCallback() {
-        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) { visibility(true) }
-        override fun onStartFailure(errorCode: Int) { visibility(false); report("Bluetooth advertising failed ($errorCode). Wi-Fi and saved messages remain available.") }
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings) { MeshLog.i("bt: advertising"); visibility(true) }
+        override fun onStartFailure(errorCode: Int) { MeshLog.i("bt: advertising failed $errorCode"); visibility(false); report("Bluetooth advertising failed ($errorCode). Wi-Fi and saved messages remain available.") }
     }
     private val gattServer = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
@@ -81,21 +83,17 @@ internal class MeshBluetooth(
                     if (!running || bytes == null || bytes.size != METADATA_BYTES || bytes[0] != VERSION) return
                     val remote = bytes.copyOfRange(3, METADATA_BYTES)
                     if (hub.identity.isOwn(remote) || hub.isLinked(remote)) return
-                    // One deterministic initiator per pair of phones (lower link ID dials).
-                    if (compareBytes(hub.identity.current(), remote) >= 0) return
+                    MeshLog.i("bt: found a Yap phone")
                     val psm = ((bytes[1].toInt() and 255) shl 8) or (bytes[2].toInt() and 255)
                     if (psm == 0) return
-                    io.execute {
-                        var socket: BluetoothSocket? = null
-                        try {
-                            if (!running) return@execute
-                            socket = result.device.createInsecureL2capChannel(psm)
-                            val pending = socket
-                            main.postDelayed({ if (!pending.isConnected) try { pending.close() } catch (_: Exception) {} }, 12_000)
-                            socket.connect()
-                            hub.attach(MeshStream(socket.inputStream, socket.outputStream, socket), MeshTransport.BLUETOOTH, outbound = true, expected = remote)
-                        } catch (_: Exception) { try { socket?.close() } catch (_: Exception) {} }
-                    }
+                    // The lower link ID dials straight away. The higher one waits, then dials only
+                    // if no link has formed: the other phone may be unable to scan (seen on a
+                    // Nothing Phone (1), error 2) and would otherwise never connect. The hub keeps
+                    // the same one of any duplicate links on both phones.
+                    if (compareBytes(hub.identity.current(), remote) < 0) dial(result.device, psm, remote)
+                    else main.postDelayed({
+                        if (running && !hub.isLinked(remote)) { MeshLog.i("bt: other phone did not dial; dialling it"); dial(result.device, psm, remote) }
+                    }, FALLBACK_DIAL_MS)
                 }
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (running && status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
@@ -121,11 +119,25 @@ internal class MeshBluetooth(
                 main.postDelayed({ if (finished.compareAndSet(false, true)) { gatts.remove(gatt); gatt.disconnect(); gatt.close() } }, 10_000)
             } catch (_: Exception) { report("Bluetooth permission or discovery changed. Re-enable nearby messaging.") }
         }
-        override fun onScanFailed(errorCode: Int) { report("Bluetooth discovery failed ($errorCode). Wi-Fi remains available.") }
+        override fun onScanFailed(errorCode: Int) { MeshLog.i("bt: scan failed $errorCode"); report("Bluetooth discovery failed ($errorCode). Wi-Fi remains available.") }
     }
     init {
         // After a link-ID rotation, phones seen under the old ID must be re-read.
         hub.onRotate { seen.clear() }
+    }
+    private fun dial(device: BluetoothDevice, psm: Int, remote: ByteArray) {
+        io.execute {
+            var socket: BluetoothSocket? = null
+            try {
+                if (!running || hub.isLinked(remote)) return@execute
+                socket = device.createInsecureL2capChannel(psm)
+                val pending = socket
+                main.postDelayed({ if (!pending.isConnected) try { pending.close() } catch (_: Exception) {} }, 12_000)
+                socket.connect()
+                MeshLog.i("bt: link socket connected")
+                hub.attach(MeshStream(socket.inputStream, socket.outputStream, socket), MeshTransport.BLUETOOTH, outbound = true, expected = remote)
+            } catch (e: Exception) { MeshLog.i("bt: link failed ${e.javaClass.simpleName}"); try { socket?.close() } catch (_: Exception) {} }
+        }
     }
     fun start() {
         if (Build.VERSION.SDK_INT < 29) { report("Bluetooth mesh needs Android 10 or later. Wi-Fi nearby messaging still works."); return }
@@ -133,6 +145,7 @@ internal class MeshBluetooth(
         val radio = adapter ?: run { report("Bluetooth is not supported. Wi-Fi nearby messaging still works."); return }
         if (!radio.isEnabled) { report("Bluetooth is off. Wi-Fi nearby messaging still works."); return }
         running = true; val token = ++generation
+        MeshLog.i("bt: starting")
         io.execute {
             try {
                 val socket = radio.listenUsingInsecureL2capChannel()

@@ -75,6 +75,7 @@ internal class MeshWifiDirect(
             when (intent.action) {
                 WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION -> {
                     val enabled = intent.getIntExtra(WifiP2pManager.EXTRA_WIFI_STATE, -1) == WifiP2pManager.WIFI_P2P_STATE_ENABLED
+                    MeshLog.i("direct: p2p enabled=$enabled")
                     if (enabled) beginDiscovery()
                 }
                 WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
@@ -143,8 +144,8 @@ internal class MeshWifiDirect(
                 val info = WifiP2pDnsSdServiceInfo.newInstance(INSTANCE, SERVICE_TYPE, mapOf(KEY to MeshWifi.nameFor(hub.identity.current())))
                 service = info
                 p2p.addLocalService(channel, info, object : WifiP2pManager.ActionListener {
-                    override fun onSuccess() {}
-                    override fun onFailure(reason: Int) { report("Wi-Fi Direct could not advertise ($reason)") }
+                    override fun onSuccess() { MeshLog.i("direct: advertising") }
+                    override fun onFailure(reason: Int) { MeshLog.i("direct: advertise failed $reason"); report("Wi-Fi Direct could not advertise ($reason)") }
                 })
             }
         })
@@ -153,9 +154,6 @@ internal class MeshWifiDirect(
     private fun search() {
         val channel = channel ?: return
         val p2p = manager ?: return
-        // Many phones only answer service queries while they are themselves in peer
-        // discovery, so without this our advert is invisible to everyone else.
-        runCatching { p2p.discoverPeers(channel, null) }
         p2p.clearServiceRequests(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() = request()
             override fun onFailure(reason: Int) = request()
@@ -164,11 +162,11 @@ internal class MeshWifiDirect(
                 p2p.addServiceRequest(channel, WifiP2pDnsSdServiceRequest.newInstance(), object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
                         p2p.discoverServices(channel, object : WifiP2pManager.ActionListener {
-                            override fun onSuccess() {}
-                            override fun onFailure(reason: Int) { if (reason != WifiP2pManager.BUSY) report("Wi-Fi Direct search failed ($reason)") }
+                            override fun onSuccess() { MeshLog.i("direct: searching") }
+                            override fun onFailure(reason: Int) { MeshLog.i("direct: search failed $reason"); if (reason != WifiP2pManager.BUSY) report("Wi-Fi Direct search failed ($reason)") }
                         })
                     }
-                    override fun onFailure(reason: Int) {}
+                    override fun onFailure(reason: Int) { MeshLog.i("direct: service request failed $reason") }
                 })
             }
         })
@@ -176,8 +174,9 @@ internal class MeshWifiDirect(
 
     private fun found(record: Map<String, String>?, device: WifiP2pDevice) {
         val remote = idFromRecord(record) ?: return
-        // A Bluetooth link does not count: Wi-Fi should still form and the hub swaps to it.
-        if (!running || hub.identity.isOwn(remote) || hub.isLinkedOverWifi(remote)) return
+        // Any existing link (Bluetooth included) wins: forming a group disturbs the shared radio.
+        if (!running || hub.identity.isOwn(remote) || hub.isLinked(remote)) return
+        MeshLog.i("direct: found a Yap phone")
         if (compareBytes(hub.identity.current(), remote) >= 0) return // only the lower link ID connects
         val now = System.currentTimeMillis()
         // One connection attempt at a time, and never leave a group we are a client in.
@@ -187,12 +186,13 @@ internal class MeshWifiDirect(
         val config = WifiP2pConfig().apply { deviceAddress = device.deviceAddress; wps.setup = WpsInfo.PBC }
         val channel = channel ?: return
         manager?.connect(channel, config, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {}
-            override fun onFailure(reason: Int) { lastConnect = 0 }
+            override fun onSuccess() { MeshLog.i("direct: connect requested") }
+            override fun onFailure(reason: Int) { MeshLog.i("direct: connect failed $reason"); lastConnect = 0 }
         })
     }
 
     private fun groupChanged(info: WifiP2pInfo?) {
+        MeshLog.i("direct: group formed=${info?.groupFormed} owner=${info?.isGroupOwner}")
         if (info == null || !info.groupFormed) { inGroup = false; isOwner = false; groupSince = 0; return }
         if (!inGroup) groupSince = System.currentTimeMillis()
         inGroup = true; isOwner = info.isGroupOwner

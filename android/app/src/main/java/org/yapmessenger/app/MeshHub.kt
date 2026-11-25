@@ -93,7 +93,9 @@ internal class MeshHub(
     private val helloTimeoutMs: Long = 12_000,
     private val idleTimeoutMs: Long = 25_000,
     private val keepaliveMs: Long = 12_000,
-    private val frameLimit: () -> AdmissionGate = { AdmissionGate(240, 1024 * 1024, elapsed) }
+    private val frameLimit: () -> AdmissionGate = { AdmissionGate(240, 1024 * 1024, elapsed) },
+    /** Diagnostic events (link up, link closed and why). Never pass IDs or content here. */
+    private val trace: (String) -> Unit = {}
 ) {
     private val random = SecureRandom()
     private val readers = Executors.newCachedThreadPool { task -> Thread(task, "yap-mesh-reader").apply { isDaemon = true } }
@@ -110,15 +112,18 @@ internal class MeshHub(
     /** Transports call this so they can refresh adverts (for example the Wi-Fi service name). */
     fun onRotate(listener: () -> Unit) { synchronized(rotationListeners) { rotationListeners += listener } }
 
-    fun start() { if (closedForever) return; identity.rotate(); running = true }
-    fun stop() { running = false; peersSnapshot().forEach { it.close() }; changed(0) }
+    /**
+     * A fresh link ID only when actually starting. Calling this while running used to
+     * rotate the ID under live links and adverts, so phones linked to their own stale
+     * adverts and both sides of a pair thought they were the initiator.
+     */
+    @Synchronized fun start() { if (closedForever || running) return; identity.rotate(); running = true }
+    fun stop() { running = false; peersSnapshot().forEach { it.close("nearby messaging stopped") }; changed(0) }
     fun close() { closedForever = true; stop(); timers.shutdownNow(); readers.shutdownNow(); writes.shutdownNow() }
     val isRunning get() = running
 
     fun connections(): List<Peer> = peersSnapshot()
     fun isLinked(id: ByteArray): Boolean = synchronized(peers) { peers.containsKey(meshToken(id)) }
-    /** True only for a Wi-Fi link. A Bluetooth link should not stop Wi-Fi from forming: it has more range and speed, and [prefer] swaps to it. */
-    fun isLinkedOverWifi(id: ByteArray): Boolean = synchronized(peers) { peers[meshToken(id)]?.transport == MeshTransport.WIFI }
     private fun peersSnapshot() = synchronized(peers) { peers.values.toList() }
 
     /**
@@ -143,13 +148,14 @@ internal class MeshHub(
         if (identity.rotateIfDue()) {
             // Links made with the old ID would otherwise keep it alive. Drop them;
             // transports reconnect under the new ID and queued ciphertext is retried.
-            peersSnapshot().forEach { it.close() }
+            peersSnapshot().forEach { it.close("link ID rotation (by design)") }
             synchronized(rotationListeners) { rotationListeners.toList() }.forEach { runCatching { it() } }
             return
         }
         val now = elapsed()
         peersSnapshot().forEach { peer ->
-            if (now - peer.lastRead > idleTimeoutMs || (peer.writeStarted > 0 && now - peer.writeStarted > 20_000)) peer.close()
+            if (now - peer.lastRead > idleTimeoutMs) peer.close("nothing received for ${idleTimeoutMs / 1000} s")
+            else if (peer.writeStarted > 0 && now - peer.writeStarted > 20_000) peer.close("a write stalled for 20 s")
             else if (now - peer.lastWrite > keepaliveMs) peer.send(MeshFrames.KEEPALIVE, ByteArray(0))
         }
     }
@@ -177,6 +183,7 @@ internal class MeshHub(
         @Volatile var lastWrite = lastRead; private set
         @Volatile var writeStarted = 0L; private set
         internal var initiatorKey = ByteArray(0); private set
+        @Volatile private var upAt = 0L
         private val closed = AtomicBoolean(false)
         private val input = DataInputStream(stream.input)
         private val output = DataOutputStream(stream.output)
@@ -190,7 +197,12 @@ internal class MeshHub(
         private fun write(type: Int, bytes: ByteArray) = synchronized(output) {
             check(!closed.get() && bytes.size + 1 <= MeshFrames.MAX_FRAME)
             writeStarted = elapsed()
-            output.writeInt(bytes.size + 1); output.writeByte(type); output.write(bytes); output.flush()
+            // One write per frame. Bluetooth L2CAP sends every write() as its own packet, so
+            // writing length, type and body separately made a keepalive (empty body) end in a
+            // zero-length packet. Some phones (a Nothing Phone) then misread the stream and
+            // dropped every Bluetooth link at the first keepalive, 12-13 s after connecting.
+            val frame = java.nio.ByteBuffer.allocate(5 + bytes.size).putInt(bytes.size + 1).put(type.toByte()).put(bytes).array()
+            output.write(frame); output.flush()
             lastWrite = elapsed(); writeStarted = 0
         }
 
@@ -206,7 +218,7 @@ internal class MeshHub(
                             inflight[key] = now
                         }
                         write(type, bytes)
-                    } catch (_: Exception) { close() }
+                    } catch (e: Exception) { close("write failed: ${e.javaClass.simpleName}") }
                 }
             } catch (_: RejectedExecutionException) { /* Outbox keeps ciphertext for retry. */ }
         }
@@ -214,7 +226,7 @@ internal class MeshHub(
         fun consumeAck(key: String): Boolean = synchronized(inflight) { inflight.remove(key) != null }
 
         internal fun readLoop() {
-            val deadline = timers.schedule({ if (token.isEmpty()) close() }, helloTimeoutMs, TimeUnit.MILLISECONDS)
+            val deadline = timers.schedule({ if (token.isEmpty()) close("no HELLO within ${helloTimeoutMs / 1000} s") }, helloTimeoutMs, TimeUnit.MILLISECONDS)
             try {
                 write(MeshFrames.HELLO, localId + localNonce)
                 var first = true
@@ -239,9 +251,11 @@ internal class MeshHub(
                                 else -> this
                             }
                         }
-                        if (keep === this) { close(); return }
+                        if (keep === this) { trace("duplicate $transport link dropped; the existing link stays"); close(); return }
                         token = name
-                        keep?.close()
+                        keep?.close("replaced by a newer duplicate $transport link")
+                        upAt = elapsed()
+                        trace("link up: $transport ${if (outbound) "outbound" else "inbound"}")
                         first = false; changed(connections().size)
                     } else if (type == MeshFrames.KEEPALIVE) check(bytes.isEmpty())
                     else {
@@ -256,12 +270,14 @@ internal class MeshHub(
                         record(this, type, bytes)
                     }
                 }
-            } catch (_: Exception) { /* Reconnect retries durable ciphertext; no inferred receipt. */ }
-            finally { deadline.cancel(false); close(); synchronized(peers) { slots-- } }
+            } catch (e: Exception) { close("connection ended: ${e.javaClass.simpleName}") } // type only: messages can hold addresses
+            // Reconnect retries durable ciphertext; no inferred receipt.
+            finally { deadline.cancel(false); close("closed"); synchronized(peers) { slots-- } }
         }
 
-        fun close() {
+        fun close(why: String = "closed by its transport") {
             if (!closed.compareAndSet(false, true)) return
+            if (token.isNotEmpty()) trace("link closed: $transport, $why, after ${(elapsed() - upAt) / 1000} s")
             val removed = synchronized(peers) { if (token.isNotEmpty() && peers[token] === this) { peers.remove(token); true } else false }
             runCatching { stream.close() }
             if (removed) changed(connections().size)

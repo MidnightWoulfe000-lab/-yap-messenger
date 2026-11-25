@@ -71,6 +71,41 @@ class MeshHubTest {
         assertTrue("previous ID still recognised as our own", a.identity.isOwn(first))
     }
 
+    /** Bluetooth L2CAP turns every write() into its own packet; an empty one broke a Nothing Phone's reader. */
+    @Test fun eachFrameIsOneNonEmptyWrite() {
+        val a = hub(); val b = hub()
+        val writes = CopyOnWriteArrayList<Int>()
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val client = Socket(InetAddress.getLoopbackAddress(), server.localPort)
+            val accepted = server.accept()
+            sockets += client; sockets += accepted
+            val recording = object : java.io.OutputStream() {
+                override fun write(b: Int) { writes += 1; client.getOutputStream().write(b) }
+                override fun write(b: ByteArray, off: Int, len: Int) { writes += len; client.getOutputStream().write(b, off, len) }
+                override fun flush() = client.getOutputStream().flush()
+            }
+            a.attach(MeshStream(client.getInputStream(), recording, client), MeshTransport.BLUETOOTH, outbound = true)
+            b.attach(MeshStream(accepted.getInputStream(), accepted.getOutputStream(), accepted), MeshTransport.BLUETOOTH, outbound = false)
+        }
+        waitFor { a.connections().size == 1 && b.connections().size == 1 }
+        a.connections().single().send(MeshFrames.KEEPALIVE, ByteArray(0))
+        a.connections().single().send(MeshFrames.ENVELOPE, ByteArray(100) { 7 })
+        waitFor { received.any { it.first == MeshFrames.ENVELOPE } }
+        assertEquals("HELLO, keepalive and envelope, one write each", listOf(5 + MeshFrames.HELLO_BYTES, 5, 105), writes.toList())
+        assertEquals("the keepalive must not end the link", 1, b.connections().size)
+    }
+
+    @Test fun startingWhileRunningKeepsTheLinkIdAndLinks() {
+        val a = hub(); val b = hub()
+        link(a, b)
+        waitFor { a.connections().size == 1 && b.connections().size == 1 }
+        val id = a.identity.current()
+        a.start() // the app resumes nearby messaging without stopping it first
+        assertArrayEquals("a resume must not rotate the ID under live links", id, a.identity.current())
+        Thread.sleep(200)
+        assertEquals(1, a.connections().size)
+    }
+
     @Test fun idRotatesOnSchedule() {
         val now = AtomicLong(0)
         val identity = LinkIdentity({ now.get() }, minimumMs = 1_000, jitterMs = 0)
@@ -149,6 +184,17 @@ class MeshHubTest {
         assertNull(MeshWifi.linkIdFromName("yap-xyz"))
         assertNull(MeshWifi.linkIdFromName("printer"))
         assertNull(MeshWifi.linkIdFromName("yap-" + "G".repeat(32)))
+    }
+
+    /** Open Aware links cannot carry a port, so READY carries it, plus the link mode both sides must use. */
+    @Test fun awareReadyCarriesAValidPortAndLinkMode() {
+        for (port in listOf(1, 80, 47_651, 65_535)) for (passphrase in listOf(false, true))
+            assertEquals(MeshWifiAware.Ready(port, passphrase), MeshWifiAware.parseReady(MeshWifiAware.readyFor(port, passphrase)))
+        assertNull(MeshWifiAware.parseReady("yap-ready".toByteArray())) // first build: no port
+        assertNull(MeshWifiAware.parseReady("yap-ready".toByteArray() + byteArrayOf(1, 2))) // port but no mode
+        assertNull(MeshWifiAware.parseReady(MeshWifiAware.readyFor(0, false)))
+        assertNull(MeshWifiAware.parseReady("yap-ready".toByteArray() + byteArrayOf(1, 2, 7))) // unknown mode
+        assertNull(MeshWifiAware.parseReady("yap-reaDY".toByteArray() + byteArrayOf(1, 2, 0)))
     }
 
     @Test fun awareAndDirectDiscoveryAcceptOnlyOneLinkId() {
