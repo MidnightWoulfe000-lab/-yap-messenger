@@ -109,14 +109,55 @@ storing a relay copy (its outbox is already retrying). Between two relays a boun
 after rotation is harmless: the original relay's 10-minute recent cache refuses it.
 
 **Limits:**
-- Carrier copies are single-custody: a relay deletes its copy once the next phone
-  acknowledges it. The owner raised the case where B hands to B2 and then meets C
-  first. Proposed fix: limited-copy routing ("spray and wait", around 8 copies),
-  **not yet built**; it needs a short routing plan first (`docs/SECURITY.md` lists
-  routing policy as needing a specification).
+- See "Spray and wait" below: carriers no longer give up their only copy.
 - The core A→B→C path is covered by the Rust test
   `custody_survives_restart_and_a_b_c_forwarding_keeps_payload_identical`. It has
   **never been tested on three real phones.**
+
+## Spray and wait (12 copies) and effort stamps
+
+Owner decisions (25 Nov 2026): limited-copy routing with 12 copies, and an effort stamp.
+
+**Frame:** nearby ENVELOPE frames are now `copies (1) + effort stamp (8) + envelope`.
+New frame DELIVERED (8, 48-byte relay key) means "I am the recipient and have it".
+
+**Rules:**
+- The sender starts each envelope with 12 copies. Anyone holding more than one copy
+  offers half to each new link (`Spray.give`); when that link ACKs, the holder keeps
+  the rest. 12 goes 6, 3, 1, 1.
+- With one copy left, the holder only delivers straight to the recipient. A phone
+  that is not the recipient declines a one-copy offer (no ACK, nothing stored).
+- The recipient answers DELIVERED. A carrier then deletes its copy entirely; the
+  sender only updates the message status and keeps its outbox copy until the
+  encrypted receipt arrives, as before.
+- Carriers store copies and stamp beside the envelope (`relay_routing_v1` table,
+  `Relay::admit_carried`, `Relay::hand_off`). Missing row = 1 copy, no stamp.
+- Offers are tracked per link for 60 s so an ACK subtracts the right number, and so
+  waiting envelopes at the head of the queue cannot starve the rest (the host asks
+  the native store for 128 and sends up to 16 not recently offered on that link).
+- The sender's copy counts and stamps live in memory: after an app restart its own
+  envelopes start again at 12 copies and are re-stamped. Accepted for the dev build.
+
+**Effort stamp:** `EffortStamp.kt`. The sender finds 8 bytes so that
+`SHA-256("Yap stamp v1\0" || relay key || stamp)` starts with 18 zero bits (about a
+quarter of a million hashes, roughly 0.3–1 s on a mid-range phone, once per
+envelope, receipts included). Every phone checks it with one hash before the flood
+guard or any native work, and drops envelopes without a valid stamp. Carriers pass
+it on unchanged. It slows phone-based spam; a laptop can still mint many per minute,
+so flood slow mode and limited copies stay the main defences.
+
+**Accepted trade-offs and gaps:**
+- A modified app can lie about copies (claim 12 every time). That only spreads its
+  own messages further; flood slow mode still limits how many it can push.
+- A modified app can send DELIVERED for envelopes it is not the recipient of, making
+  that one carrier drop its copy. Other copies survive.
+- No phone-wide "delivered" signal yet: other copies wander until they expire (24 h).
+  A forgery-proof one needs the address-label work first.
+- Copy count 12 and stamp difficulty 18 bits are starting values. A crowd simulation
+  to tune them is still to do.
+
+Tests: `SprayAndStampTest.kt`; core `spray_and_wait_copies_and_stamp_travel_with_the_envelope`,
+`copies_are_clamped_and_plain_admit_means_one_copy`.
 
 ## Background running (MeshService)
 
@@ -183,6 +224,9 @@ before any native work.
   `FloodGuardTest.kt`.
 
 ## What is still permanent (not fixed here, needs a spec)
+
+**A plan now exists:** [rotating address labels](rotating-address-labels.md), awaiting review.
+
 
 The **envelope header** still carries the recipient's permanent route token
 (`destination`) and a per-contact `sender_hint`. Every envelope is sent to every

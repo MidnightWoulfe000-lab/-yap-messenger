@@ -471,3 +471,46 @@ fn committed_custody_survives_abrupt_process_exit() {
     let relay = Relay::open(&file.0, config(), clock(start, 1)).unwrap();
     assert_eq!(relay.queued_count().unwrap(), 1);
 }
+
+#[test]
+fn spray_and_wait_copies_and_stamp_travel_with_the_envelope() {
+    let file = File::new();
+    let start = Instant::now();
+    let now = clock(start, 0);
+    let mut relay = Relay::open(&file.0, config(), now).unwrap();
+    let key = stored(
+        relay
+            .admit_carried(&envelope(1, b"x").encode(), [1; 16], 6, Some([5; 8]), now)
+            .unwrap(),
+    );
+    let forward = relay.pending_for([2; 16], now, 16).unwrap().remove(0);
+    assert_eq!((forward.copies, forward.stamp), (6, Some([5; 8])));
+    // Hand half to the next phone: 3 left, still held.
+    assert_eq!(relay.hand_off(key, 3, now).unwrap(), 3);
+    assert_eq!(relay.pending_for([2; 16], now, 16).unwrap()[0].copies, 3);
+    assert_eq!(relay.hand_off(key, 2, now).unwrap(), 1);
+    // Giving away the last copy releases custody.
+    assert_eq!(relay.hand_off(key, 1, now).unwrap(), 0);
+    assert_eq!(relay.queued_count().unwrap(), 0);
+}
+
+#[test]
+fn copies_are_clamped_and_plain_admit_means_one_copy() {
+    let file = File::new();
+    let start = Instant::now();
+    let now = clock(start, 0);
+    let mut relay = Relay::open(&file.0, config(), now).unwrap();
+    relay
+        .admit_carried(&envelope(1, b"a").encode(), [1; 16], 200, None, now)
+        .unwrap();
+    relay
+        .admit(&envelope(2, b"b").encode(), [1; 16], now)
+        .unwrap();
+    let copies: Vec<u8> = relay
+        .pending_for([2; 16], now, 16)
+        .unwrap()
+        .iter()
+        .map(|f| f.copies)
+        .collect();
+    assert_eq!(copies, vec![yap_core::relay::MAX_COPIES, 1]);
+}

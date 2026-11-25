@@ -130,7 +130,12 @@ impl Client {
             if envelope.relay_key() != key {
                 return Err(bad());
             }
-            result.push(Forward { key, envelope });
+            result.push(Forward {
+                key,
+                envelope,
+                copies: 1,
+                stamp: None,
+            });
         }
     }
     /// Call only after local durable acceptance; never on a mere socket read.

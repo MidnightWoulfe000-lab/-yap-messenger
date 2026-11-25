@@ -28,7 +28,12 @@ Yap is a free, open-source messenger that works with or without the internet. Ph
 - Your own messages and messages you carry for other people are kept separately.
 - Your phone carries up to 10,000 messages for others (64 MB max). When it's full, the oldest ones are deleted to make room.
 
+**Getting messages through**
+- Each message starts with 12 copies. A phone carrying it hands half its copies to each new phone it meets, so a message spreads to a handful of phones instead of everyone. When a phone is down to its last copy it keeps it and only hands it straight to the person it's for. So if B passes a message to B2 and then bumps into the recipient first, B still has it.
+- When the recipient gets a message it tells the carrier "delivered", and the carrier deletes its copy.
+
 **Spam protection**
+- Every message carries an effort stamp: the sender's phone does about a second of work to make it, and every other phone checks it instantly. Messages without a valid stamp are dropped. Sending one message costs nothing you'd notice; sending thousands is slow and drains the battery.
 - If one connection sends more than 40 messages in a minute, it gets slowed to one message every 3 seconds for 5 minutes.
 - If the whole phone gets more than 100 in a minute, everything slows to one a second for 2 minutes. That catches spammers who keep reconnecting.
 - Nothing gets lost. Slowed messages just wait and get sent again.
@@ -41,12 +46,11 @@ Yap is a free, open-source messenger that works with or without the internet. Ph
 **Must do before anyone relies on it**
 - Test on real phones: two phones on the same Wi-Fi, a hotspot, Bluetooth only, three phones with one in the middle carrying messages, and phones locked in pockets. Steps are in [testing on Android](docs/testing-android.md).
 - An independent security audit.
-- Message labels: each message still carries a fixed address label so phones know where to pass it. A modified app nearby could collect those and recognise the same person over time. Fixing it changes the encryption design, so it needs a written plan first.
+- Message labels: each message still carries a fixed address label so phones know where to pass it. A modified app nearby could collect those and recognise the same person over time. There's now a written plan to make the labels change every hour ([rotating address labels](docs/proposals/rotating-address-labels.md)). It changes the encryption design, so it needs reviewing before we build it.
 
 **Next up**
-- Limited copies ("spray and wait"): right now a carrier phone hands a message on and deletes its copy. If it then meets the actual recipient first, it has nothing to give. The plan is to start each message with about 8 copies.
-- A crowd simulation to pick the right number of copies.
-- An "effort stamp" (proof of work) on each message so mass spam is slow and expensive to make.
+- A crowd simulation to check that 12 copies and the effort stamp difficulty are the right numbers.
+- A "delivered" signal that reaches every phone carrying a copy, not just the one that handed it over. Right now the other copies wander until they expire after 24 hours.
 - Group chats. Big crowds need them, and they're the hardest part to get right.
 - Making the internet side work through Tor instead of our own server.
 - Fixing the open security findings, mainly: a wrong clock can lock you out, someone with deep access to the phone could roll back its data, and a contact could fill your message history and jam the chat. Full list in the [security audit](docs/audit/2026-11-25-security-audit.md).
@@ -57,6 +61,8 @@ Yap is a free, open-source messenger that works with or without the internet. Ph
 - Doesn't restart after the phone is switched off and on. Open Yap once.
 - Background running uses more battery. Bring a power bank.
 - Anyone scanning nearby can tell a phone is running Yap, just not whose it is.
+- If you restart the app, messages you're still sending start again at 12 copies.
+- A laptop can still make effort stamps much faster than a phone. The slowdown rules are what stop a flood; the stamp just makes phone-based spam expensive.
 
 ## For developers and agents
 

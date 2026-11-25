@@ -31,6 +31,8 @@ internal object MeshFrames {
     const val ENVELOPE = 4; const val ACK = 5; const val KEEPALIVE = 6
     /** Ask nearby phones for the public pairing bundle matching a scanned QR commitment. */
     const val BUNDLE_REQUEST = 7
+    /** "I am the recipient and have it": the carrier can drop its copy entirely. */
+    const val DELIVERED = 8
     const val MAX_FRAME = 65_537
     const val ID_BYTES = 16
     const val NONCE_BYTES = 8
@@ -239,11 +241,12 @@ internal class MeshHub(
                         first = false; changed(connections().size)
                     } else if (type == MeshFrames.KEEPALIVE) check(bytes.isEmpty())
                     else {
-                        check(type in MeshFrames.BUNDLE..MeshFrames.ACK || type == MeshFrames.BUNDLE_REQUEST)
+                        check(type in MeshFrames.BUNDLE..MeshFrames.ACK || type == MeshFrames.BUNDLE_REQUEST || type == MeshFrames.DELIVERED)
                         when (type) {
                             MeshFrames.BUNDLE -> check(bytes.size == 1883)
                             MeshFrames.CONFIRM -> check(bytes.size == 101)
-                            MeshFrames.ACK -> check(bytes.size == 48)
+                            MeshFrames.ACK, MeshFrames.DELIVERED -> check(bytes.size == 48)
+                            MeshFrames.ENVELOPE -> check(bytes.size >= 1 + EffortStamp.BYTES + 74)
                             MeshFrames.BUNDLE_REQUEST -> check(bytes.size == 32)
                         }
                         record(this, type, bytes)

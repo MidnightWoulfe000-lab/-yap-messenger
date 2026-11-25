@@ -104,6 +104,13 @@ internal class SecureModel(private val application: Application) {
     private val ownKeys = LinkedHashSet<String>()
     /** Per-link and phone-wide flood slow mode for nearby envelopes. See FloodGuard. */
     private val floodGuard = FloodGuard({ SystemClock.elapsedRealtime() })
+    // Spray and wait (worker thread only). Copies left for our own envelopes and
+    // their effort stamps, kept in memory: after a restart own envelopes start
+    // again at 12 copies and are re-stamped. Offers record what we gave each link,
+    // so an ACK subtracts the right number of copies.
+    private val ownCopies = HashMap<String, Int>()
+    private val ownStamps = HashMap<String, ByteArray>()
+    private val offers = HashMap<String, Pair<Int, Long>>() // "link|key" -> (given, when)
     private var nextRelayAttempt = 0L
     private var relayFailures = 0
     private val radio = LocalMesh(application,
@@ -111,7 +118,7 @@ internal class SecureModel(private val application: Application) {
         visibility = { visible -> main.post { meshDiscoverable = visible } }, record = ::localRecord)
     private val internet = InternetRelay(
         status = { connected, message -> main.post { internetConnected = connected; status = message } },
-        incoming = { bytes, key, acknowledge -> receive("internet-relay", bytes, key, acknowledge) },
+        incoming = { bytes, key, acknowledge -> receive("internet-relay", bytes, key) { acknowledge() } },
         custody = { key -> acknowledged(key) })
 
     init {
@@ -295,20 +302,46 @@ internal class SecureModel(private val application: Application) {
     private fun acknowledged(key: String) { submit(silent = true) {
         call("ack", JSONObject().put("key", key)); relay("relay_ack", JSONObject().put("key", key))
     } }
-    private fun receive(source: String, bytes: ByteArray, expectedKey: String?, ack: () -> Unit) {
+    /**
+     * [ack] gets true when this phone is the recipient (send DELIVERED) and false
+     * when it took the envelope as a carrier (send ACK). With [copies] == 1 a phone
+     * that is not the recipient declines, which is the "wait" half of spray and wait.
+     */
+    private fun receive(source: String, bytes: ByteArray, expectedKey: String?, copies: Int = 1, stamp: ByteArray? = null, ack: (Boolean) -> Unit) {
         if (!active || !initialized || bytes.size !in 74..65_536 || !EndpointAdmission.packet(source, bytes.size)) return
         submit(silent = true) {
             if (!active || !initialized) return@submit
             val local = decodeToken(publicState.route)
-            if (!bytes.copyOfRange(20, 36).contentEquals(local) && source != "internet-relay" && encodeToken(envelopeKey(bytes)) in ownKeys) {
-                ack(); return@submit
+            val mine = bytes.copyOfRange(20, 36).contentEquals(local)
+            if (!mine && source != "internet-relay" && encodeToken(envelopeKey(bytes)) in ownKeys) {
+                ack(false); return@submit // our own envelope came back: take it off their hands
             }
-            val data = if (bytes.copyOfRange(20, 36).contentEquals(local)) call("receive", JSONObject().put("bytes", encodeToken(bytes)))
-                else relay("relay_admit", JSONObject().put("bytes", encodeToken(bytes)).put("peer", sourceToken(source)))
+            if (!mine && source != "internet-relay" && copies <= 1) return@submit
+            val data = if (mine) call("receive", JSONObject().put("bytes", encodeToken(bytes)))
+                else relay("relay_admit", JSONObject().put("bytes", encodeToken(bytes)).put("peer", sourceToken(source))
+                    .put("copies", copies).apply { stamp?.let { put("stamp", encodeToken(it)) } })
             val key = data.optString("custody")
-            if (key.isNotEmpty() && (expectedKey == null || key == expectedKey)) ack()
+            if (key.isNotEmpty() && (expectedKey == null || key == expectedKey)) ack(mine)
         }
     }
+    /** Offer an envelope on a link with half our copies (or 1 = recipient only). */
+    private fun offer(peer: MeshHub.Peer, raw: ByteArray, key: String, copies: Int, stamp: ByteArray) {
+        val now = SystemClock.elapsedRealtime()
+        val slot = peer.token + "|" + key
+        if (offers[slot]?.let { now - it.second < 60_000 } == true) return // offered recently on this link
+        if (offers.size > 8192) offers.entries.removeAll { now - it.value.second >= 60_000 }
+        val give = Spray.give(copies)
+        offers[slot] = give to now
+        peer.send(MeshFrames.ENVELOPE, Spray.encode(give, stamp, raw), key)
+    }
+    private fun handedOff(peer: MeshHub.Peer, key: String, delivered: Boolean) { submit(silent = true) {
+        val given = offers.remove(peer.token + "|" + key)?.first ?: 1
+        if (key in ownKeys) {
+            call("ack", JSONObject().put("key", key)) // status only; the outbox keeps it until a receipt
+            if (delivered) ownCopies[key] = 1 else ownCopies[key] = ((ownCopies[key] ?: Spray.MAX_COPIES) - given).coerceAtLeast(1)
+        } else if (delivered) relay("relay_ack", JSONObject().put("key", key))
+        else relay("relay_handoff", JSONObject().put("key", key).put("given", given))
+    } }
     private fun sourceToken(source: String): String = if (source == "internet-relay") encodeToken(MessageDigest.getInstance("SHA-256").digest(source.toByteArray()).copyOf(16)) else source
     private fun localRecord(peer: MeshHub.Peer, type: Int, bytes: ByteArray) {
         if (!active || !initialized) return
@@ -345,11 +378,21 @@ internal class SecureModel(private val application: Application) {
                     data.optString("confirmation").takeIf { it.isNotEmpty() && it != "null" }?.let { peer.send(MeshFrames.CONFIRM, decodeToken(it)) }
                 }
             }
-            MeshFrames.ENVELOPE -> if (floodGuard.allow(peer.token)) receive(peer.token, bytes, null) {
-                // Only after the endpoint snapshot or relay DB commit succeeds.
-                val key = envelopeKey(bytes); peer.send(MeshFrames.ACK, key)
+            MeshFrames.ENVELOPE -> {
+                val frame = Spray.decode(bytes) ?: return
+                // One hash: junk without a valid effort stamp is dropped before anything else.
+                val key = envelopeKey(frame.envelope)
+                if (!EffortStamp.valid(key, frame.stamp)) return
+                if (!floodGuard.allow(peer.token)) return
+                receive(peer.token, frame.envelope, null, frame.copies, frame.stamp) { delivered ->
+                    // Only after the endpoint snapshot or relay DB commit succeeds.
+                    peer.send(if (delivered) MeshFrames.DELIVERED else MeshFrames.ACK, key)
+                }
             }
-            MeshFrames.ACK -> { val key = encodeToken(bytes); if (peer.consumeAck(key)) acknowledged(key) }
+            MeshFrames.ACK, MeshFrames.DELIVERED -> {
+                val key = encodeToken(bytes)
+                if (peer.consumeAck(key)) handedOff(peer, key, type == MeshFrames.DELIVERED)
+            }
         }
     }
     private fun envelopeKey(raw: ByteArray): ByteArray {
@@ -378,15 +421,29 @@ internal class SecureModel(private val application: Application) {
                 else {
                     val key = packet.getString("key")
                     ownKeys.remove(key); ownKeys.add(key)
-                    while (ownKeys.size > 2048) ownKeys.remove(ownKeys.first())
-                    local.forEach { it.send(MeshFrames.ENVELOPE, raw, key) }
+                    while (ownKeys.size > 2048) ownKeys.first().let { ownKeys.remove(it); ownCopies.remove(it); ownStamps.remove(it) }
+                    if (local.isNotEmpty()) {
+                        val stamp = ownStamps.getOrPut(key) { EffortStamp.make(decodeToken(key)) } // ~0.3–1 s, once per envelope
+                        val copies = ownCopies.getOrPut(key) { Spray.MAX_COPIES }
+                        local.forEach { offer(it, raw, key, copies, stamp) }
+                    }
                     if (internet.connected) internet.offer(raw, key)
                 }
             }
         }
         local.forEach { peer ->
-            val pending = relay("relay_pending", JSONObject().put("peer", peer.token)).getJSONArray("packets")
-            for (i in 0 until pending.length()) pending.getJSONObject(i).let { peer.send(MeshFrames.ENVELOPE, decodeToken(it.getString("bytes")), it.getString("key")) }
+            // Ask for more than we send so envelopes waiting for their recipient
+            // (one copy left) cannot block the rest of the queue on this link.
+            val pending = relay("relay_pending", JSONObject().put("peer", peer.token).put("limit", 128)).getJSONArray("packets")
+            var sent = 0
+            for (i in 0 until pending.length()) {
+                if (sent >= 16) break
+                val item = pending.getJSONObject(i)
+                val stamp = item.optString("stamp").takeIf { it.isNotEmpty() && it != "null" }?.let(::decodeToken) ?: continue
+                val key = item.getString("key")
+                if (offers[peer.token + "|" + key]?.let { SystemClock.elapsedRealtime() - it.second < 60_000 } == true) continue
+                offer(peer, decodeToken(item.getString("bytes")), key, item.optInt("copies", 1), stamp); sent++
+            }
         }
         if (internet.connected) {
             val pending = relay("relay_pending", JSONObject().put("peer", sourceToken("internet-relay"))).getJSONArray("packets")

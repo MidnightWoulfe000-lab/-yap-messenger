@@ -9,6 +9,12 @@ use std::time::{Duration, Instant};
 
 const QUEUE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("relay_queue_v1");
 const META: TableDefinition<&str, u64> = TableDefinition::new("relay_meta_v1");
+/// Per-envelope routing data for nearby carriers: copies left (1 byte) and the
+/// sender's effort stamp (8 bytes). Kept beside the queue so the queue record
+/// format and the internet relay server are unchanged. Missing row = 1 copy, no stamp.
+const ROUTING: TableDefinition<&[u8], &[u8]> = TableDefinition::new("relay_routing_v1");
+/// Spray-and-wait starting copy budget (owner decision, 25 Nov 2026).
+pub const MAX_COPIES: u8 = 12;
 const STORED_PREFIX: usize = 24;
 pub type StoreResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -68,6 +74,11 @@ pub enum Admission {
 pub struct Forward {
     pub key: RelayKey,
     pub envelope: Envelope,
+    /// Copies this holder may still hand out (spray and wait). 1 = deliver only
+    /// directly to the recipient.
+    pub copies: u8,
+    /// Sender's effort stamp, carried unchanged. None for internet relay records.
+    pub stamp: Option<[u8; 8]>,
 }
 
 struct Window {
@@ -246,8 +257,10 @@ impl Relay {
                 expired.push(key.value().to_vec());
             }
         }
+        let mut routing = transaction.open_table(ROUTING)?;
         for key in expired {
             queue.remove(key.as_slice())?;
+            routing.remove(key.as_slice())?;
         }
         Ok(())
     }
@@ -293,6 +306,19 @@ impl Relay {
     }
 
     pub fn admit(&mut self, bytes: &[u8], source: Token, clock: Clock) -> StoreResult<Admission> {
+        self.admit_carried(bytes, source, 1, None, clock)
+    }
+
+    /// Admit with spray-and-wait routing data. `copies` is clamped to 1..=MAX_COPIES.
+    /// An envelope already held keeps its existing routing data.
+    pub fn admit_carried(
+        &mut self,
+        bytes: &[u8],
+        source: Token,
+        copies: u8,
+        stamp: Option<[u8; 8]>,
+        clock: Clock,
+    ) -> StoreResult<Admission> {
         let clock = self.normalize_clock(clock);
         if !self.charge(source, bytes.len(), clock) {
             return Ok(Admission::Rejected(Reject::RateLimited));
@@ -354,6 +380,7 @@ impl Relay {
                             break;
                         }
                         queue.remove(key.as_slice())?;
+                        transaction.open_table(ROUTING)?.remove(key.as_slice())?;
                         count -= 1;
                         used -= length;
                     }
@@ -366,6 +393,16 @@ impl Relay {
                     stored.extend_from_slice(&source);
                     stored.extend_from_slice(bytes);
                     queue.insert(key.as_slice(), stored.as_slice())?;
+                    let mut routing = [0u8; 9];
+                    routing[0] = copies.clamp(1, MAX_COPIES);
+                    if let Some(stamp) = stamp {
+                        routing[1..].copy_from_slice(&stamp);
+                    }
+                    if routing != [1, 0, 0, 0, 0, 0, 0, 0, 0] {
+                        transaction
+                            .open_table(ROUTING)?
+                            .insert(key.as_slice(), routing.as_slice())?;
+                    }
                     admission = Admission::Stored(key);
                 }
             }
@@ -384,6 +421,7 @@ impl Relay {
         self.prune(clock)?;
         let transaction = self.database.begin_read()?;
         let queue = transaction.open_table(QUEUE)?;
+        let routing = transaction.open_table(ROUTING)?;
         // Order cheaply first, then decode only the envelopes actually returned.
         let mut order: Vec<(u64, RelayKey)> = Vec::new();
         for row in queue.iter()? {
@@ -404,7 +442,20 @@ impl Relay {
             };
             let (_, _, envelope) = parse_stored(value.value())?;
             if let Some(envelope) = envelope.forwarded() {
-                result.push(Forward { key, envelope });
+                let (copies, stamp) = match routing.get(key.as_slice())? {
+                    Some(row) if row.value().len() == 9 => {
+                        let row = row.value();
+                        let stamp: [u8; 8] = row[1..].try_into().unwrap();
+                        (row[0].max(1), (stamp != [0; 8]).then_some(stamp))
+                    }
+                    _ => (1, None),
+                };
+                result.push(Forward {
+                    key,
+                    envelope,
+                    copies,
+                    stamp,
+                });
             }
         }
         Ok(result)
@@ -421,6 +472,7 @@ impl Relay {
             .open_table(QUEUE)?
             .remove(key.as_slice())?
             .is_some();
+        transaction.open_table(ROUTING)?.remove(key.as_slice())?;
         transaction.commit()?;
         if removed {
             self.recent.retain(|(seen, time)| {
@@ -434,6 +486,41 @@ impl Relay {
             self.recent.push_back((key, clock.monotonic));
         }
         Ok(removed)
+    }
+
+    /// Spray and wait: the next phone durably took `given` of our copies. Keep
+    /// the rest; when none are left, release custody entirely. Returns copies left.
+    pub fn hand_off(&mut self, key: RelayKey, given: u8, clock: Clock) -> StoreResult<u8> {
+        let current = {
+            let transaction = self.database.begin_read()?;
+            if transaction
+                .open_table(QUEUE)?
+                .get(key.as_slice())?
+                .is_none()
+            {
+                return Ok(0);
+            }
+            match transaction.open_table(ROUTING)?.get(key.as_slice())? {
+                Some(row) if row.value().len() == 9 => row.value().to_vec(),
+                _ => vec![1, 0, 0, 0, 0, 0, 0, 0, 0],
+            }
+        };
+        let left = current[0].max(1).saturating_sub(given);
+        if left == 0 {
+            self.transfer_custody(key, clock)?;
+            return Ok(0);
+        }
+        let clock = self.normalize_clock(clock);
+        let mut transaction = self.database.begin_write()?;
+        transaction.set_durability(Durability::Immediate);
+        self.check_clock(&transaction, clock)?;
+        let mut row = current;
+        row[0] = left;
+        transaction
+            .open_table(ROUTING)?
+            .insert(key.as_slice(), row.as_slice())?;
+        transaction.commit()?;
+        Ok(left)
     }
 
     pub fn queued_count(&self) -> StoreResult<u64> {

@@ -128,8 +128,20 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
             )?
             .try_into()
             .map_err(|_| anyhow::anyhow!("invalid peer token"))?;
+            // Spray-and-wait copies and the sender's effort stamp (checked by the
+            // Kotlin host before admission) are stored beside the envelope.
+            let copies = args["copies"]
+                .as_u64()
+                .map_or(1, |c| c.min(u64::from(yap_core::relay::MAX_COPIES)) as u8);
+            let stamp = match args["stamp"].as_str() {
+                Some(text) => Some(
+                    <[u8; 8]>::try_from(bytes::decode(text, 8)?)
+                        .map_err(|_| anyhow::anyhow!("invalid stamp"))?,
+                ),
+                None => None,
+            };
             match relay
-                .admit(&raw, peer, clock)
+                .admit_carried(&raw, peer, copies, stamp, clock)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
             {
                 Admission::Stored(key) | Admission::AlreadyStored(key) => {
@@ -148,10 +160,15 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
             )?
             .try_into()
             .map_err(|_| anyhow::anyhow!("invalid peer token"))?;
+            // The host asks for more than it sends and skips envelopes it already
+            // offered on this link, so a stuck head of the queue cannot starve the rest.
+            let limit = args["limit"]
+                .as_u64()
+                .map_or(16, |l| l.clamp(1, 256) as usize);
             let pending = relay
-                .pending_for(peer, clock, 16)
+                .pending_for(peer, clock, limit)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            json!({"packets":pending.into_iter().map(|p|json!({"kind":"envelope","key":bytes::encode(&p.key),"bytes":bytes::encode(&p.envelope.encode()),"destination":bytes::encode(&p.envelope.header().destination)})).collect::<Vec<_>>()})
+            json!({"packets":pending.into_iter().map(|p|json!({"kind":"envelope","key":bytes::encode(&p.key),"bytes":bytes::encode(&p.envelope.encode()),"destination":bytes::encode(&p.envelope.header().destination),"copies":p.copies,"stamp":p.stamp.map(|s|bytes::encode(&s))})).collect::<Vec<_>>()})
         }
         "relay_ack" => {
             let key = bytes::decode(
@@ -163,6 +180,21 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
             .try_into()
             .map_err(|_| anyhow::anyhow!("invalid relay key"))?;
             json!({"released":relay.transfer_custody(key,clock).map_err(|e|anyhow::anyhow!(e.to_string()))?})
+        }
+        "relay_handoff" => {
+            let key = bytes::decode(
+                args["key"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("key missing"))?,
+                48,
+            )?
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("invalid relay key"))?;
+            let given = args["given"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("given missing"))?
+                .min(255) as u8;
+            json!({"left":relay.hand_off(key,given,clock).map_err(|e|anyhow::anyhow!(e.to_string()))?})
         }
         "relay_count" => {
             relay
