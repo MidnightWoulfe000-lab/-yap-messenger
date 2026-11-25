@@ -1,7 +1,8 @@
 # Local mesh v3: proximity Wi-Fi (Aware and Direct)
 
-**Status: implemented, never run on a phone, not compiled in the session that wrote it
-(no Android SDK there). Not independently reviewed.**
+**Status: implemented. Compiles; unit tests and lint pass (26 November 2026, with
+placeholder native libraries, so this proves compilation only). Never run on a phone.
+Not independently reviewed.**
 
 **Audience: coding agents and maintainers.** Read with [local-mesh-v2.md](local-mesh-v2.md).
 
@@ -63,8 +64,8 @@ messaging" switch are unchanged. The user sees no new controls.
 ## Not done / open questions
 1. Real-phone tests. Aware and Direct are the least predictable Android radio APIs.
    Expect bugs in data-path setup, group negotiation and a system prompt on connect.
-2. The change was not compiled or unit-tested in the session that wrote it.
-   Run `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest :app:lintDebug` first.
+2. Compilation and JVM tests do not exercise the radios. Aware and Direct have only been
+   type-checked against the Android 15 SDK.
 3. Should Direct take over when Aware is supported but fails?
 4. Every link is reported as the generic Wi-Fi transport; Connections does not say which
    radio is in use (by design: one switch).
