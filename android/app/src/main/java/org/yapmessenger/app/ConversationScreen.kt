@@ -32,7 +32,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = White) }
-            YapAvatar(if (preview) chat.name else "", chat.group, 40)
+            YapAvatar(if (preview || secure) chat.name else "", chat.group, 40)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f).then(if (chat.group) Modifier.clickable(onClickLabel = "Group details", onClick = group) else Modifier)) {
                 Text(chat.name, color = White, style = MaterialTheme.typography.titleMedium)
@@ -40,7 +40,7 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                     chat.group -> "Sample group · 6 members"
                     preview && chat.id == "maya" -> "Internet"
                     preview && chat.id == "updates" -> "Sample app updates"
-                    secure -> if (sendEnabled) "Paired key · available links" else status
+                    secure -> if (sendEnabled) "Paired · end-to-end encrypted" else status
                     else -> "Legacy Bluetooth · unencrypted"
                 },
                     color = Soft, style = MaterialTheme.typography.labelMedium)
@@ -121,7 +121,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, pending: Boolean,
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
         }
-        if (enabled) Text(when { pending -> "Saving to queue…"; bytes > maxBytes -> "$bytes / $maxBytes UTF-8 bytes · Shorten your message"; else -> "$bytes / $maxBytes UTF-8 bytes" },
+        if (enabled && (pending || bytes >= maxBytes * 7 / 10)) Text(when { pending -> "Saving to queue…"; bytes > maxBytes -> "$bytes / $maxBytes UTF-8 bytes · Shorten your message"; else -> "$bytes / $maxBytes UTF-8 bytes" },
             color = if (bytes > maxBytes) Coral else Soft, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 14.dp, top = 6.dp))
     }
 }

@@ -39,8 +39,8 @@ internal fun Wordmark() {
 }
 
 @Composable
-internal fun YapAvatar(name: String = "", group: Boolean = false, size: Int = 52) {
-    val accent = if (group) Lime else if (name.startsWith("M") || name.startsWith("P")) Coral else Blue
+internal fun YapAvatar(name: String = "", group: Boolean = false, size: Int = 52, tint: Color? = null) {
+    val accent = tint ?: if (group) Lime else if (name.startsWith("M") || name.startsWith("P")) Coral else Blue
     Box(Modifier.size(size.dp).background(if (group) Lime else accent.copy(alpha = .17f), CircleShape)
         .border(1.dp, accent.copy(alpha = if (group) 1f else .45f), CircleShape), contentAlignment = Alignment.Center) {
         if (group || name.isEmpty()) Icon(if (group) Icons.Outlined.Groups else Icons.Outlined.PhoneAndroid,

@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit,
-    secure: SecureModel, discoverMesh: () -> Unit, scan: () -> Unit, share: (String) -> Unit) {
+    secure: SecureModel, discoverMesh: () -> Unit, scan: () -> Unit, share: (String) -> Unit, profile: ProfileStore) {
     var screen by rememberSaveable { mutableStateOf("chats") }
     var preview by rememberSaveable { mutableStateOf(false) }
     var selectedChat by rememberSaveable { mutableStateOf("ravi") }
@@ -22,6 +22,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
     var controlsBack by rememberSaveable { mutableStateOf("network") }
     var pairingBack by rememberSaveable { mutableStateOf("chats") }
     var legacyBack by rememberSaveable { mutableStateOf("connections") }
+    var profileBack by rememberSaveable { mutableStateOf("chats") }
     var reduceMotion by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -42,6 +43,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
         screen = when (screen) {
             "details", "group", "contact_identity" -> "conversation"
             "pairing" -> pairingBack
+            "profile" -> profileBack
             "licences" -> "preference"
             "legacy_connections" -> legacyBack
             "connections" -> controlsBack
@@ -51,6 +53,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
     }
     fun connections(parent: String) { controlsBack = parent; screen = "connections" }
     fun pair() { secure.scannedQr = ""; pairingBack = screen; screen = "pairing" }
+    fun profileScreen() { profileBack = screen; screen = "profile" }
     fun legacy() { legacyBack = screen; screen = "legacy_connections" }
     LaunchedEffect(screen, preview) {
         focus.clearFocus()
@@ -62,6 +65,11 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
     BackHandler(enabled = screen != "chats" || preview) {
         if (screen == "chats" && preview) preview = false else back()
     }
+    if (!profile.onboarded) {
+        Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().imePadding()) { OnboardingScreen(profile, discoverMesh) }
+        return
+    }
+    val link = if (secure.internetConnected) "Internet" else if (secure.meshEnabled) (if (secure.localPeers > 0) "Nearby · ${secure.localPeers}" else "Nearby · looking") else "Offline"
     Column(Modifier.fillMaxSize().background(Ink).safeDrawingPadding().imePadding()) {
         if (preview) {
             Row(Modifier.fillMaxWidth().background(Blue.copy(alpha = .15f)).padding(start = 16.dp)) {
@@ -77,7 +85,10 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                     preview = preview,
                     open = { selectedChat = it; screen = "conversation" },
                     newChat = { if (preview) { selectedChat = "ravi"; screen = "conversation" } else pair() },
-                    pairFirst = !preview && secure.snapshot.contacts.isEmpty())
+                    pairFirst = !preview && secure.snapshot.contacts.isEmpty(),
+                    myName = profile.name, myColour = avatarColour(profile.colour), link = link,
+                    linkActive = secure.internetConnected || secure.localPeers > 0,
+                    openProfile = { profileScreen() }, openLink = { connections("chats") })
                 "conversation" -> ConversationScreen(chat, messages, preview, if (secureId != null) secure.draft else session.draft,
                     { if (secureId != null) secure.draft = it else session.draft = it }, if (secureId != null) secure.busy else session.pendingText != null,
                     if (secureId != null) secureContact?.phase ?: secure.status else session.status,
@@ -88,7 +99,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                     sendEnabled = secureId == null || secureContact?.ready == true && !secure.locked,
                     secure = secureId != null)
                 "network" -> NetworkScreen(session, preview, reduceMotion, manage = { connections("network") }, meshPeers = secure.localPeers, internet = secure.internetConnected, meshVisible = secure.meshDiscoverable)
-                "settings" -> SettingsScreen(open = { settingsPage = it; screen = "preference" },
+                "settings" -> SettingsScreen(profile, openProfile = { profileScreen() }, open = { settingsPage = it; screen = "preference" },
                     preview = { preview = true; selectedChat = "ravi"; screen = "chats" })
                 "preference" -> when {
                     !preview && settingsPage == "Privacy & identity" -> SecureIdentityScreen(secure, pair = { pair() }, back = { back() })
@@ -101,7 +112,8 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                 "connections" -> if (preview || controlsBack == "conversation" && secureId == null) ConnectionScreen(session, preview, discover, back = { back() })
                     else SecureConnectionsScreen(secure, discoverMesh, legacy = { legacy() }, back = { back() })
                 "legacy_connections" -> ConnectionScreen(session, preview, discover, back = { back() })
-                "pairing" -> PairingScreen(secure, scan, share, back = { back() })
+                "pairing" -> PairingScreen(secure, scan, share, profile.name, back = { back() })
+                "profile" -> ProfileScreen(profile, secure.snapshot.identity, addFriend = { pair() }, back = { back() })
                 "contact_identity" -> SecureContactScreen(secureContact, secure, share, back = { back() })
                 "licences" -> MessagingLicencesScreen(back = { back() })
                 "details" -> messages.firstOrNull { it.id == selectedMessage }?.let { MessageDetailsScreen(it, preview) { back() } }

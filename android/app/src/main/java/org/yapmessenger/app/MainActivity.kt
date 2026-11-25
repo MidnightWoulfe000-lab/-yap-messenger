@@ -17,6 +17,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var bluetooth: YapBluetooth
     private val session by lazy { ViewModelProvider(this)[ChatSession::class.java] }
     private val secure by lazy { SecureModel.get(application) }
+    private val profile by lazy { ProfileStore(applicationContext) }
     private val scan = registerForActivityResult(ScanContract()) { result -> result.contents?.let { secure.scannedQr = it } }
     private var permissionAction: (() -> Unit)? = null
     private var acceptsBluetoothUpdates = false
@@ -40,7 +41,8 @@ class MainActivity : ComponentActivity() {
                     discoverMesh = { withBluetoothPermissions(optional = true) { bluetooth.stop(); secure.enableMesh() } },
                     scan = { scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
                         .setOrientationLocked(false).setPrompt("Scan the other phone's Yap pairing code")) },
-                    share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) })
+                    share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) },
+                    profile = profile)
             }
         }
     }
