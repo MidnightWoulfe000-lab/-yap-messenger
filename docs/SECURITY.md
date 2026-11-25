@@ -55,3 +55,6 @@ Two-phone exchange was demonstrated in user tests. The new 0.2 paired endpoint
 uses the separately reviewed contract linked above. Its native encryption and
 persistence tests do not validate physical radio interoperability or establish
 production readiness.
+
+## Known issues
+A manual (non-independent) code review on 25 November 2026 recorded open issues, including a stable route token readable over BLE, unauthenticated mesh HELLO, no snapshot rollback protection and clock-lockout behaviour. See [audit/2026-11-25-security-audit.md](audit/2026-11-25-security-audit.md).

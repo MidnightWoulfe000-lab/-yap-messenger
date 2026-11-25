@@ -6,6 +6,8 @@ Yap is a free, open-source, offline-first messenger. Keep the code practical and
 
 Before making architectural, messaging, identity, encryption, routing or group changes, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md). These preserve agreed direction but explicitly mark unresolved details. Never invent cryptographic or group-governance policy. Propose a written specification and obtain review before implementing it. Keep the existing working Bluetooth prototype intact while redesigning the UI.
 
+Security audit findings, status and rules for follow-up work are in [docs/audit/2026-11-25-security-audit.md](docs/audit/2026-11-25-security-audit.md). Read it before changing the endpoint, native bridge, relay or Bluetooth mesh code.
+
 ## Design direction
 
 Read [docs/design-system.md](docs/design-system.md) before changing the interface. Our reference is the **approved refined six-screen v2 mockup**, based on the first concept: dark ink, electric lime, cobalt, restrained coral, expressive typography and a living network visualisation. The approved image is linked from the design document; unrelated, busier alternatives are not our target.

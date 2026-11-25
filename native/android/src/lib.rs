@@ -18,6 +18,28 @@ use yap_endpoint::bytes;
 static RELAYS: OnceLock<Mutex<BTreeMap<String, Relay>>> = OnceLock::new();
 static PANIC_HOOK: Once = Once::new();
 
+/// Host-supplied filesystem paths must be absolute, free of `..` and NUL, and
+/// bounded. The Kotlin host is trusted, but this keeps a future host bug (or a
+/// crafted request) from steering the relay database to an arbitrary location.
+fn check_path(path: &str) -> Result<()> {
+    use std::path::{Component, Path};
+    ensure!(!path.is_empty() && path.len() < 4096, "invalid native path length");
+    ensure!(!path.contains('\0'), "invalid native path");
+    // Path::components() silently normalises interior "." segments, so inspect
+    // the raw segments as well.
+    ensure!(
+        !path.split('/').any(|segment| segment == "." || segment == ".."),
+        "native path must not contain relative components"
+    );
+    let path = Path::new(path);
+    ensure!(path.is_absolute(), "native path must be absolute");
+    ensure!(
+        path.components().all(|c| !matches!(c, Component::ParentDir | Component::CurDir)),
+        "native path must not contain relative components"
+    );
+    Ok(())
+}
+
 fn relay_call(input: &str, now: u64) -> Result<Value> {
     let request: Value = serde_json::from_str(input)?;
     let op = request["op"]
@@ -27,11 +49,20 @@ fn relay_call(input: &str, now: u64) -> Result<Value> {
     let path = args["path"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("relay path missing"))?;
-    ensure!(path.len() < 4096, "relay path exceeds limit");
-    let mut relays = RELAYS
-        .get_or_init(|| Mutex::new(BTreeMap::new()))
-        .lock()
-        .map_err(|_| anyhow::anyhow!("relay unavailable; restart Yap"))?;
+    check_path(path)?;
+    let mut relays = match RELAYS.get_or_init(|| Mutex::new(BTreeMap::new())).lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            // A panic inside a previous call may have left an in-memory Relay
+            // half-updated. Durable state lives in redb (transactional), so drop
+            // every open handle, clear the poison and reopen from disk on demand.
+            // Previously one panic disabled relay storage until the app restarted.
+            let mut guard = poisoned.into_inner();
+            guard.clear();
+            RELAYS.get().map(|m| m.clear_poison());
+            guard
+        }
+    };
     if op == "relay_close" {
         relays.remove(path);
         return Ok(json!({"ok":true}));
@@ -154,6 +185,7 @@ pub extern "system" fn Java_org_yapmessenger_app_NativeBridge_execute(
             let path = header["args"]["path"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("directory missing"))?;
+            check_path(path)?;
             ensure!(
                 std::path::Path::new(path).is_dir(),
                 "storage directory missing"
@@ -172,8 +204,36 @@ pub extern "system" fn Java_org_yapmessenger_app_NativeBridge_execute(
         Err(_) => json!({"ok":false,"error":"Native operation failed; no result was committed"})
             .to_string(),
     };
+    // A failed JNI call (for example get_string on a bad argument) can leave a
+    // Java exception pending, which makes every later JNI call fail and would
+    // return null into Kotlin. Clear it and always hand back a JSON error.
+    let _ = env.exception_clear();
     match env.new_string(text) {
         Ok(value) => value.into_raw(),
-        Err(_) => std::ptr::null_mut(),
+        Err(_) => {
+            let _ = env.exception_clear();
+            match env.new_string(r#"{"ok":false,"error":"Native response could not be returned"}"#) {
+                Ok(value) => value.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_path;
+
+    #[test]
+    fn accepts_absolute_paths() {
+        assert!(check_path("/data/user/0/org.yapmessenger.app/no_backup/messaging/relay-v1.redb").is_ok());
+    }
+
+    #[test]
+    fn rejects_unsafe_paths() {
+        for bad in ["", "relative/path", "./x", "/a/../etc/passwd", "/a/./b", "/a\0b"] {
+            assert!(check_path(bad).is_err(), "{bad:?} should be rejected");
+        }
+        assert!(check_path(&format!("/{}", "a".repeat(4096))).is_err());
     }
 }
