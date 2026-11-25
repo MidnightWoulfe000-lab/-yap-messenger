@@ -59,7 +59,11 @@ class MainActivity : ComponentActivity() {
         ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         // Nearby messaging also asks to show notifications (Android 13+) so new messages
         // can be announced while Yap runs in the background. Optional, like Bluetooth.
-        val permissions = if (optional && Build.VERSION.SDK_INT >= 33) bluetooth + Manifest.permission.POST_NOTIFICATIONS else bluetooth
+        // Nearby Wi-Fi (Aware and Direct) needs its own permission on Android 13+, and
+        // location on Android 12 and older. Optional: Bluetooth still works without it.
+        val wifi = if (!optional) emptyArray<String>() else if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.POST_NOTIFICATIONS)
+            else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        val permissions = (bluetooth + wifi).distinct().toTypedArray()
         val missing = permissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) action() else {
             permissionAction = action; permissionOptional = optional
@@ -75,7 +79,7 @@ class MainActivity : ComponentActivity() {
             permissionAction = null
             val bluetoothGranted = permissions.indices.all { permissions[it] == Manifest.permission.POST_NOTIFICATIONS || grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED }
             if (grantResults.isNotEmpty() && bluetoothGranted) action?.invoke()
-            else if (permissionOptional) action?.invoke() // continue with Wi-Fi only
+            else if (permissionOptional) action?.invoke() // continue with whatever was granted
             else session.status = "Bluetooth permission is needed. Allow the requested permissions and try again."
         }
     }

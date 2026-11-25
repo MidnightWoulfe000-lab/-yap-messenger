@@ -3,6 +3,12 @@
 **Status: implemented on branch `ccr-ba12ab3f-getmod` (25 November 2026). Not yet
 tested on real phones. Not independently reviewed.**
 
+> **Update:** the Wi-Fi transport below only works on a shared network or hotspot, which
+> is not the drop-in, drop-out proximity behaviour the owner wanted. Proximity Wi-Fi
+> (Aware, with Direct as a fallback) is in
+> [local-mesh-v3-proximity-wifi.md](local-mesh-v3-proximity-wifi.md). The Aware/Direct
+> follow-up at the end of this page is superseded by it.
+
 **Audience: coding agents and maintainers.** Read this before changing
 `MeshHub.kt`, `MeshBluetooth.kt`, `MeshWifi.kt`, `LocalMesh.kt` or the pairing code
 in `SecureModel.kt`.

@@ -95,7 +95,7 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
         PageHeader("Connections", back)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             DetailRow("Nearby messaging", "${model.localPeers} nearby phone(s) connected", Icons.Default.Hub)
-            Text("Sends encrypted messages to nearby phones over Bluetooth and Wi-Fi while Yap is open. No internet needed: phones on the same Wi-Fi, or joined to one phone's hotspot, find each other. Queued messages survive restart.", color = Soft)
+            Text("Sends encrypted messages to nearby phones over Bluetooth and Wi-Fi while Yap is open. No internet, router or hotspot needed: phones in range find each other directly, and drop off when they move away. Phones on the same Wi-Fi or hotspot also link up. Queued messages survive restart.", color = Soft)
             Button(onClick = enableMesh, enabled = !model.locked && model.snapshot.identity.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text(if (model.meshEnabled) "Restart nearby messaging" else "Turn on nearby messaging")
             }

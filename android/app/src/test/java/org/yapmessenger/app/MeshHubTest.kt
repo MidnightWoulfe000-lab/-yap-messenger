@@ -151,6 +151,18 @@ class MeshHubTest {
         assertNull(MeshWifi.linkIdFromName("yap-" + "G".repeat(32)))
     }
 
+    @Test fun awareAndDirectDiscoveryAcceptOnlyOneLinkId() {
+        val id = ByteArray(16) { (it * 7).toByte() }
+        assertArrayEquals(id, MeshWifiAware.idFromInfo(id))
+        assertNull(MeshWifiAware.idFromInfo(null))
+        assertNull(MeshWifiAware.idFromInfo(ByteArray(15)))
+        assertNull(MeshWifiAware.idFromInfo(ByteArray(17)))
+        assertArrayEquals(id, MeshWifiDirect.idFromRecord(mapOf("n" to MeshWifi.nameFor(id))))
+        assertNull(MeshWifiDirect.idFromRecord(mapOf("n" to "printer")))
+        assertNull(MeshWifiDirect.idFromRecord(mapOf("other" to MeshWifi.nameFor(id))))
+        assertNull(MeshWifiDirect.idFromRecord(null))
+    }
+
     @Test fun unsignedCompareOrdersHighBytesLast() {
         assertTrue(compareBytes(byteArrayOf(1), byteArrayOf(-1)) < 0)
         assertEquals(0, compareBytes(byteArrayOf(5, 6), byteArrayOf(5, 6)))

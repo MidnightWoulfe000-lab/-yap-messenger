@@ -191,7 +191,7 @@ internal class SecureModel(private val application: Application) {
     private fun stopTransports() { radio.stop(); internet.stop(); main.post { localPeers = 0; internetConnected = false } }
     private fun resumeConfigured() = synchronized(lifecycleLock) {
         if (!active) return@synchronized
-        if (repository.settings().optBoolean("mesh")) radio.start(bluetoothAllowed = permissions())
+        if (repository.settings().optBoolean("mesh")) radio.start(bluetoothAllowed = permissions(), proximityWifiAllowed = proximityWifiPermission())
         nextRelayAttempt = 0
     }
     private fun permissions(): Boolean {
@@ -199,9 +199,13 @@ internal class SecureModel(private val application: Application) {
             else listOf(Manifest.permission.ACCESS_FINE_LOCATION)
         return required.all { application.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     }
+    private fun proximityWifiPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
+        return application.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+    }
     fun enableMesh() { submit {
         val settings = repository.settings().put("mesh", true); repository.saveSettings(settings)
-        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (active) { radio.stop(); radio.start(bluetoothAllowed = permissions()) } }
+        main.post { meshEnabled = true }; synchronized(lifecycleLock) { if (active) { radio.stop(); radio.start(bluetoothAllowed = permissions(), proximityWifiAllowed = proximityWifiPermission()) } }
         if (foreground) MeshService.start(application)
     } }
     fun disableMesh() {

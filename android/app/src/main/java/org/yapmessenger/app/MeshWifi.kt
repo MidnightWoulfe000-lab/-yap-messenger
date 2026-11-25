@@ -180,7 +180,7 @@ internal class MeshWifi(
         dial(gateway, PORT, null)
     }
 
-    private fun dial(host: InetAddress, port: Int, expected: ByteArray?) {
+    internal fun dial(host: InetAddress, port: Int = PORT, expected: ByteArray? = null) {
         if (!running || port !in 1..65_535) return
         if (!(host.isSiteLocalAddress || host.isLinkLocalAddress)) return // local networks only
         val key = "${host.hostAddress}:$port"

@@ -3,12 +3,19 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.aware" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Wi-Fi nearby messaging: find the hotspot gateway. No runtime prompt. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Background nearby messaging (MeshService). CHANGE_NETWORK_STATE is install-time and
          satisfies Android 14's connectedDevice rule even if Bluetooth permission is refused. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Proximity Wi-Fi (Aware and Direct), no router needed. Android 13+ asks for Nearby Wi-Fi
+         devices; Android 12 and older ask for location (see ACCESS_FINE_LOCATION below). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -16,8 +23,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- Only Android 8–11 use location for BLE scans. Android 12+ uses Nearby Devices. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"
+    <!-- Android 8–11 use location for BLE scans; Android 8–12 use it for Wi-Fi Aware and Direct. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32"
         tools:ignore="CoarseFineLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

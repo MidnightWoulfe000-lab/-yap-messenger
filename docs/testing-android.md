@@ -40,6 +40,19 @@ This tests the paired, encrypted chat (not the legacy Bluetooth chat). See [loca
 
 Record phone models, Android versions and the network type (home router, public Wi-Fi, hotspot) for any failure.
 
+## Nearby messaging with no router
+
+Tests Wi-Fi Aware and Wi-Fi Direct. See [local mesh v3](proposals/local-mesh-v3-proximity-wifi.md). Use two or three phones, **Wi-Fi connected to nothing**, mobile data off, hotspot off, Bluetooth off.
+
+1. Check each phone for Aware (`adb shell cmd wifiaware` or Settings feature lists). Note which phones have it, because Direct runs only on those without.
+2. Turn on nearby messaging on both and allow **Nearby devices** (Android 13+) or location (Android 12 and older). Within about a minute the nearby count should show 1.
+3. Pair and exchange messages both ways. Walk one phone out of range: the count should drop to 0. Walk back: it should return without touching either phone.
+4. Aware phone with Direct-only phone: expect no link over Wi-Fi; Bluetooth must still link them if on.
+5. Direct-only pair: expect a possible system prompt on connect. Record it, and whether the phone lost its normal Wi-Fi.
+6. Rotation: leave connected 25 minutes. Expect a reconnect every 10–20 minutes, no loss or duplicates.
+7. Refuse the Nearby devices permission: Bluetooth and shared-network Wi-Fi must still run.
+8. Record phone models, Android versions, which radio linked (adb logcat) and any failure.
+
 ## Compose interface checks
 
 Run the [local build and test commands](../android/README.md#build-and-automated-checks) before committing. CI builds the APK, runs unit tests and lint, and compiles the device tests. Run device tests separately with a connected emulator or phone.

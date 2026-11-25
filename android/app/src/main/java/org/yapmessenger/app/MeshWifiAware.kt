@@ -1,0 +1,271 @@
+package org.yapmessenger.app
+
+import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.wifi.aware.AttachCallback
+import android.net.wifi.aware.DiscoverySessionCallback
+import android.net.wifi.aware.PeerHandle
+import android.net.wifi.aware.PublishConfig
+import android.net.wifi.aware.PublishDiscoverySession
+import android.net.wifi.aware.SubscribeConfig
+import android.net.wifi.aware.SubscribeDiscoverySession
+import android.net.wifi.aware.WifiAwareManager
+import android.net.wifi.aware.WifiAwareNetworkInfo
+import android.net.wifi.aware.WifiAwareNetworkSpecifier
+import android.net.wifi.aware.WifiAwareSession
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import java.io.Closeable
+import java.net.ServerSocket
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Wi-Fi Aware (NAN) transport: phones find each other directly over Wi-Fi hardware
+ * and open a peer-to-peer link with no router, no hotspot and no shared network.
+ * Phones in range link up; phones out of range drop off. Needs Android 10+ and a
+ * Wi-Fi chip that supports Aware; [supported] says whether this phone does.
+ *
+ * Discovery: every phone publishes and subscribes to one service. The publisher's
+ * service-specific info is only the hub's rotating random link ID. The phone with the
+ * lower link ID is the initiator (same rule as Bluetooth and Wi-Fi): it messages the
+ * publisher, the publisher opens a listening socket and a data path, and the initiator
+ * connects to it. Frames, link IDs and duplicate handling live in [MeshHub].
+ *
+ * The data path is deliberately open (no passphrase). A fixed passphrase compiled into
+ * an open-source app protects nothing, and every envelope is already end-to-end
+ * encrypted. The link is unauthenticated, exactly like the Bluetooth link.
+ *
+ * Not tested on real phones. See docs/proposals/local-mesh-v3-proximity-wifi.md.
+ */
+@SuppressLint("MissingPermission", "NewApi") // Callers check permission and API level.
+internal class MeshWifiAware(
+    private val context: Context,
+    private val hub: MeshHub,
+    private val report: (String) -> Unit
+) {
+    companion object {
+        private const val SERVICE = "yapmesh"
+        private val HELLO = "yap".toByteArray()
+        private const val MAX_OUTGOING = 2
+        private const val MAX_INCOMING = 2
+        private const val SETUP_TIMEOUT_MS = 30_000L
+
+        fun supported(context: Context) =
+            Build.VERSION.SDK_INT >= 29 && context.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
+
+        /** Service-specific info is exactly one link ID; anything else is not ours. */
+        internal fun idFromInfo(info: ByteArray?): ByteArray? = info?.takeIf { it.size == MeshFrames.ID_BYTES }?.copyOf()
+    }
+
+    private val manager: WifiAwareManager? = context.getSystemService(WifiAwareManager::class.java)
+    private val connectivity = context.getSystemService(ConnectivityManager::class.java)
+    private val main = Handler(Looper.getMainLooper())
+    private val io = Executors.newCachedThreadPool { task -> Thread(task, "yap-aware").apply { isDaemon = true } }
+    private val timer = Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "yap-aware-timer").apply { isDaemon = true } }
+    @Volatile private var running = false
+    private var session: WifiAwareSession? = null
+    private var publish: PublishDiscoverySession? = null
+    private var subscribe: SubscribeDiscoverySession? = null
+    private var attaching = false
+    private val pending = ConcurrentHashMap<String, Long>() // remote link ID -> give-up time
+    private val outgoing = AtomicInteger()
+    private val incoming = AtomicInteger()
+    private val messageIds = AtomicInteger(1)
+    private val sent = ConcurrentHashMap<Int, Pair<PeerHandle, String>>()
+    private var receiverRegistered = false
+    private var timerScheduled = false
+
+    private val stateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!running) return
+            if (manager?.isAvailable == true) attach() else teardown()
+        }
+    }
+
+    init { hub.onRotate { if (running) main.post { restartDiscovery() } } }
+
+    /** Returns true when this phone supports Aware and it has been switched on. */
+    @Synchronized fun start(): Boolean {
+        if (running) return true
+        if (manager == null || !supported(context)) return false
+        running = true
+        val filter = IntentFilter(WifiAwareManager.ACTION_WIFI_AWARE_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(stateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else context.registerReceiver(stateReceiver, filter)
+        receiverRegistered = true
+        if (!timerScheduled) {
+            timerScheduled = true
+            timer.scheduleWithFixedDelay({ val now = System.currentTimeMillis(); pending.entries.removeIf { it.value < now } }, 10, 10, TimeUnit.SECONDS)
+        }
+        if (manager.isAvailable) attach()
+        return true
+    }
+
+    @Synchronized fun stop() {
+        if (!running) return
+        running = false
+        if (receiverRegistered) { runCatching { context.unregisterReceiver(stateReceiver) }; receiverRegistered = false }
+        teardown()
+    }
+
+    fun close() { stop(); timer.shutdownNow(); io.shutdownNow() }
+
+    private fun attach() {
+        synchronized(this) { if (session != null || attaching || !running) return; attaching = true }
+        runCatching {
+            manager?.attach(object : AttachCallback() {
+                override fun onAttached(attached: WifiAwareSession) {
+                    synchronized(this@MeshWifiAware) { attaching = false; if (!running) { attached.close(); return }; session = attached }
+                    restartDiscovery()
+                }
+                override fun onAttachFailed() {
+                    synchronized(this@MeshWifiAware) { attaching = false }
+                    report("Wi-Fi Aware could not start on this phone")
+                }
+                override fun onAwareSessionTerminated() { teardown() }
+            }, main)
+        }.onFailure { attaching = false; report("Wi-Fi Aware is unavailable") }
+    }
+
+    @Synchronized private fun teardown() {
+        runCatching { publish?.close() }; publish = null
+        runCatching { subscribe?.close() }; subscribe = null
+        runCatching { session?.close() }; session = null
+        attaching = false
+        pending.clear(); sent.clear(); outgoing.set(0); incoming.set(0)
+    }
+
+    /** Start (or restart, after a link ID rotation) publishing and subscribing. */
+    @Synchronized private fun restartDiscovery() {
+        val current = session ?: return
+        runCatching { publish?.close() }; publish = null
+        runCatching { subscribe?.close() }; subscribe = null
+        pending.clear()
+        val info = hub.identity.current()
+        runCatching {
+            current.publish(
+                PublishConfig.Builder().setServiceName(SERVICE).setServiceSpecificInfo(info).setPublishType(PublishConfig.PUBLISH_TYPE_UNSOLICITED).build(),
+                publisher, main
+            )
+            current.subscribe(
+                SubscribeConfig.Builder().setServiceName(SERVICE).setSubscribeType(SubscribeConfig.SUBSCRIBE_TYPE_PASSIVE).build(),
+                subscriber, main
+            )
+        }.onFailure { report("Wi-Fi Aware discovery failed") }
+    }
+
+    private val publisher = object : DiscoverySessionCallback() {
+        override fun onPublishStarted(started: PublishDiscoverySession) { synchronized(this@MeshWifiAware) { publish = started } }
+        override fun onSessionTerminated() { synchronized(this@MeshWifiAware) { publish = null } }
+        override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
+            if (running && message.contentEquals(HELLO)) respond(peerHandle)
+        }
+    }
+
+    private val subscriber = object : DiscoverySessionCallback() {
+        override fun onSubscribeStarted(started: SubscribeDiscoverySession) { synchronized(this@MeshWifiAware) { subscribe = started } }
+        override fun onSessionTerminated() { synchronized(this@MeshWifiAware) { subscribe = null } }
+        override fun onServiceDiscovered(peerHandle: PeerHandle, serviceSpecificInfo: ByteArray?, matchFilter: List<ByteArray>?) {
+            val remote = idFromInfo(serviceSpecificInfo) ?: return
+            if (!running || hub.identity.isOwn(remote) || hub.isLinked(remote)) return
+            if (compareBytes(hub.identity.current(), remote) >= 0) return // only the lower link ID initiates
+            val key = meshToken(remote)
+            if (outgoing.get() >= MAX_OUTGOING) return
+            if (pending.putIfAbsent(key, System.currentTimeMillis() + SETUP_TIMEOUT_MS) != null) return
+            val id = messageIds.getAndIncrement()
+            sent[id] = peerHandle to key
+            val target = subscribe
+            if (target == null) { sent.remove(id); pending.remove(key); return }
+            runCatching { target.sendMessage(peerHandle, id, HELLO) }.onFailure { sent.remove(id); pending.remove(key) }
+        }
+        override fun onMessageSendSucceeded(messageId: Int) {
+            val (peer, key) = sent.remove(messageId) ?: return
+            initiate(peer, key)
+        }
+        override fun onMessageSendFailed(messageId: Int) { sent.remove(messageId)?.let { pending.remove(it.second) } }
+    }
+
+    private fun networkRequest(spec: WifiAwareNetworkSpecifier) = NetworkRequest.Builder()
+        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
+        .setNetworkSpecifier(spec).build()
+
+    /** Initiator: ask for the data path, then connect to the port the publisher advertises. */
+    private fun initiate(peer: PeerHandle, key: String) {
+        val session = subscribe ?: run { pending.remove(key); return }
+        if (outgoing.incrementAndGet() > MAX_OUTGOING) { outgoing.decrementAndGet(); pending.remove(key); return }
+        val spec = WifiAwareNetworkSpecifier.Builder(session, peer).build()
+        val connected = java.util.concurrent.atomic.AtomicBoolean(false)
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        lateinit var callback: ConnectivityManager.NetworkCallback
+        val release = {
+            if (released.compareAndSet(false, true)) {
+                outgoing.decrementAndGet(); pending.remove(key)
+                runCatching { connectivity.unregisterNetworkCallback(callback) }
+            }
+        }
+        callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                val info = capabilities.transportInfo as? WifiAwareNetworkInfo ?: return
+                val address = info.peerIpv6Addr ?: return
+                if (info.port <= 0 || !connected.compareAndSet(false, true)) return
+                io.execute {
+                    try {
+                        val socket = network.socketFactory.createSocket(address, info.port)
+                        socket.tcpNoDelay = true; socket.keepAlive = true
+                        val closer = Closeable { runCatching { socket.close() }; release() }
+                        hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, address.hostAddress), MeshTransport.WIFI, outbound = true)
+                    } catch (_: Exception) { release() }
+                }
+            }
+            override fun onLost(network: Network) { release() }
+            override fun onUnavailable() { release() }
+        }
+        runCatching { connectivity.requestNetwork(networkRequest(spec), callback, SETUP_TIMEOUT_MS.toInt()) }
+            .onFailure { release() }
+    }
+
+    /** Publisher: open a listening socket, offer it in the data path, accept one link. */
+    private fun respond(peer: PeerHandle) {
+        val session = publish ?: return
+        if (incoming.incrementAndGet() > MAX_INCOMING) { incoming.decrementAndGet(); return }
+        val server = runCatching { ServerSocket(0) }.getOrNull() ?: run { incoming.decrementAndGet(); return }
+        val released = java.util.concurrent.atomic.AtomicBoolean(false)
+        lateinit var callback: ConnectivityManager.NetworkCallback
+        val release = {
+            if (released.compareAndSet(false, true)) {
+                incoming.decrementAndGet()
+                runCatching { server.close() }
+                runCatching { connectivity.unregisterNetworkCallback(callback) }
+            }
+        }
+        callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) { release() }
+            override fun onUnavailable() { release() }
+        }
+        val spec = runCatching { WifiAwareNetworkSpecifier.Builder(session, peer).setPort(server.localPort).build() }.getOrNull()
+            ?: run { release(); return }
+        if (runCatching { connectivity.requestNetwork(networkRequest(spec), callback, SETUP_TIMEOUT_MS.toInt()) }.isFailure) { release(); return }
+        io.execute {
+            try {
+                server.soTimeout = SETUP_TIMEOUT_MS.toInt()
+                val socket = server.accept()
+                runCatching { server.close() }
+                socket.tcpNoDelay = true; socket.keepAlive = true
+                val closer = Closeable { runCatching { socket.close() }; release() }
+                hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), closer, socket.inetAddress?.hostAddress), MeshTransport.WIFI, outbound = false)
+            } catch (_: Exception) { release() }
+        }
+    }
+}
