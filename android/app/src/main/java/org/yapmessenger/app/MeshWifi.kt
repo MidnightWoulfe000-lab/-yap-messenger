@@ -74,6 +74,7 @@ internal class MeshWifi(
             while (running) {
                 val socket = try { listening.accept() } catch (_: Exception) { break }
                 configure(socket)
+                MeshLog.i("wifi: accepted a connection")
                 hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), socket, socket.inetAddress?.hostAddress), MeshTransport.WIFI, outbound = false)
             }
         }
@@ -191,6 +192,8 @@ internal class MeshWifi(
     internal fun dial(host: InetAddress, port: Int = PORT, expected: ByteArray? = null) {
         if (!running || port !in 1..65_535) return
         if (!(host.isSiteLocalAddress || host.isLinkLocalAddress)) return // local networks only
+        // Never dial ourselves (for example our own stale mDNS advert): that makes a phantom link.
+        if (runCatching { java.net.NetworkInterface.getByInetAddress(host) != null }.getOrDefault(false)) { MeshLog.i("wifi: skipped dialling this phone's own address"); return }
         val key = "${host.hostAddress}:$port"
         if (!dialling.add(key)) return
         io.execute {
@@ -204,7 +207,8 @@ internal class MeshWifi(
                 socket.connect(InetSocketAddress(host, port), 5_000)
                 configure(socket)
                 hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), socket, host.hostAddress), MeshTransport.WIFI, outbound = true, expected = expected)
-            } catch (_: Exception) { runCatching { socket.close() } }
+                MeshLog.i("wifi: dial connected")
+            } catch (e: Exception) { MeshLog.i("wifi: dial failed ${e.javaClass.simpleName}"); runCatching { socket.close() } }
             finally { dialling.remove(key) }
         }
     }

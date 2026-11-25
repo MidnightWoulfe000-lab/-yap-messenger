@@ -203,9 +203,19 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
             InfoNote(model.status, accent = if (model.locked) Coral else Blue)
             HorizontalDivider(color = Surface2)
             TextButton(onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (showAdvanced) "Hide advanced" else "Advanced: internet relay and test chat")
+                Text(if (showAdvanced) "Hide advanced" else "Advanced: relay, test chat and nearby log")
             }
             if (showAdvanced) {
+            Text("Nearby log", color = White, style = MaterialTheme.typography.titleMedium)
+            Text("Recent Bluetooth and Wi-Fi steps, to help fix connection problems. It lists events only, never names, addresses or messages, and is cleared when Yap closes.", color = Soft)
+            val context = LocalContext.current
+            var copied by remember { mutableStateOf(false) }
+            OutlinedButton(onClick = {
+                val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Yap nearby log", MeshLog.text()))
+                copied = true
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (copied) "Copied. Paste it where you need it" else "Copy nearby log") }
+            HorizontalDivider(color = Surface2)
             DetailRow("Internet relay", if (model.internetConnected) "Connected over TLS" else if (model.relayConfigured) "Configured · waiting for connection" else "Disabled", Icons.Default.Language)
             Text("Use a relay you control. Its operator must register this phone's mailbox token. No public relay is enabled by default.", color = Soft)
             OutlinedTextField(url, { url = it.take(2048) }, label = { Text("Relay URL") }, placeholder = { Text("wss://host:port/yap/v1") }, singleLine = true, modifier = Modifier.fillMaxWidth())
