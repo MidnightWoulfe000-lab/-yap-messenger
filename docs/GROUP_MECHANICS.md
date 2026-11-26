@@ -259,6 +259,18 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 
 This feature is separate from voting to revoke someone, remote scramble, confiscation reporting and simply rotating the keys of the original group.
 
+**Decided (user, 26 November 2026)**
+- **Temporary groups are a toolkit setting**, chosen when the group is created like the others. A collective such as a protest group has to fear infiltrators; a normal group may not, and can leave it off.
+- **It is automatic.** No one picks members and no one person starts it. When the conditions are met, the temporary group forms on its own and every member in reach gets a notification asking whether they want to move to it.
+- **No new QR codes.** Members were already checked in person when they joined the original group.
+- **It only happens when at least 2 people from the same group are nearby.**
+- **A phone counts as cut off** when it has not heard from more than half of the group's active members for **24 hours** (user, 26 November 2026).
+- **"Nearby" means reachable through the local mesh right now**, and a temporary group **only forms if nobody in the local mesh has internet access** (user, 26 November 2026). One phone reaching an internet relay connects the whole local mesh to the rest of the group, so the phones keep hearing from members and the cut-off rule is never met; no separate internet check is needed. Yap's internet path today is the user-configured relay in the protocol proposal; Tor is not designed yet.
+- **Two temporary groups from the same original group that come into reach** each get a notification offering to merge (user, 26 November 2026). This is separate from the rule that a temporary group is never merged into the original group.
+- **A temporary group runs as a collective** with no admins, whatever type the original group was, and keeps the original's other toolkit settings (user, 26 November 2026).
+- **Someone from the original group who comes into reach later:** the temporary group's members get a notification asking whether to invite them, and **one member's tap is enough** (user, 26 November 2026). No vote, because everyone in the temporary group is cut off and a vote would have no more information than the person tapping. Accepted risk: the late arrival may have been removed elsewhere.
+- How it would work is proposed in [group-encryption-v1.md §3.10](proposals/group-encryption-v1.md#310-temporary-groups-for-cut-off-members).
+
 ### Security properties the implementation must provide (design requirements, not settled mechanics)
 1. Clearly show **membership/revocation state is uncertain** while partitioned; do not suggest that the isolated phones know who has or has not been revoked elsewhere.
 2. Create the new group with a **different group identity and fresh cryptographic keys**, not a copy of the original group's room key.
@@ -325,6 +337,14 @@ A disconnected subset **cannot discover revocations that happened elsewhere unti
 - Network topology and neighbour sharing are a separate design area; group governance must not depend on a single permanently connected node.
 
 ## 13. Required design work before implementation
+
+Group encryption (items 2 and 6) has a proposal awaiting technical review: [group-encryption-v1.md](proposals/group-encryption-v1.md). Its choices were accepted by the user on 26 November 2026:
+- Newcomers cannot read messages from before they joined.
+- Once a phone knows a member is out, it drops their messages that arrive after that.
+- An invite QR works once, for 10 minutes at most.
+- Joining a group does not make the joiner and the inviter contacts.
+- Keys change on every removal, whenever a member marks a device as lost, and weekly for each member's own sending key.
+- The cost of a removal in a full group (about 16,000 private hand-overs) is accepted for now, to be measured on real phones.
 
 1. Define identities, device keys, room identifiers and signed event formats.
 2. Specify invitation QR contents and safe key distribution.
