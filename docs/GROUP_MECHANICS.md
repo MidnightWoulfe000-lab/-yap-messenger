@@ -85,6 +85,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - In groups of 2–3 members a majority can be just 2 people. **Confirmed as intended.**
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
+- **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
+  - Details stage one chose (need confirming): the earlier membership stays on record; every device they had before stays revoked, so they must add devices afresh; and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
 
 **Open**
 - Which membership list counts when the group is split (§8). A majority of all members cannot be reached inside a small isolated subset, which fails safe but means that subset cannot revoke anyone.
@@ -92,7 +94,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - With group revoking switched off, how a confiscated device (§7) is dealt with.
 - Whether a sponsor has any special responsibility. (The target cannot vote: decided above.)
 - Distinction between removing a device, suspending a member, and expelling a member.
-- Whether the affected person can appeal, rejoin or recover a replacement device.
+- Whether the affected person can appeal or recover a replacement device. (Rejoining: decided above.)
 - How revocation rotates group encryption keys and protects subsequent messages.
 - How revoked devices are treated during offline periods and network partitions.
 
@@ -100,7 +102,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 
 **Agreed direction**
 - An optional **scramble** feature was discussed: a queued command intended to erase local room chat on a revoked device when that device next reconnects.
-- The feature is **opt-in when joining the room**, rather than secretly imposed later.
+- ~~The feature is opt-in when joining the room.~~ **Replaced (user, 26 November 2026):** group scramble is a **group setting**, switched on or off when the group is created, not a choice each member makes. With it on, a member revoked by vote has that group wiped from their devices whether or not they would have chosen it. Joining a group with the setting on is the consent, so the app must show the setting clearly before anyone joins; it is never imposed later. With group revoking switched off it has no effect.
 - The intention is to reduce exposure if a device is lost, confiscated or revoked.
 
 **Critical security limitation**
@@ -109,8 +111,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - Future encryption key rotation can prevent access to **future** messages but cannot retroactively erase messages already copied.
 
 **Decided (user, 26 November 2026)**
-- A scramble can be triggered in two ways, both only for devices whose owner opted in when joining:
-  - **Automatically**, when a valid group revocation of that device takes effect.
+- A scramble can be triggered in two ways:
+  - **Automatically**, when a valid group revocation of that device takes effect, in a group created with group scramble on.
   - **By the device's owner**, for example from another of their devices or a friend's phone if theirs is lost or taken.
 
 - **Owner identity:** each device gets an **alphanumeric password**, set up with the profile. The owner uses it to prove who they are when triggering a scramble from a device other than the lost one, such as a friend's phone. This replaces the earlier idea of a PIN.
@@ -130,10 +132,11 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - Any device drops the command once its age passes 24 hours.
   - No device needs a correct clock, only a working stopwatch for the time it held the packet. Delay-tolerant networking uses the same idea for nodes without accurate clocks (the Bundle Age block in RFC 9171).
   - Time spent in transit over a single radio link is not counted, but that is seconds, not hours.
-- **Known flaws (accepted, since scramble is opt-in):**
+- **Known flaws (accepted, since group scramble is a setting chosen at group creation):**
   - A dishonest **member** forwarder can under-report how long it held the command, stretching its life. Each forwarder signs its own addition, so this can be traced to it afterwards but not prevented.
   - The stopwatch resets when a phone restarts. A forwarder must save the age before shutting down; time spent switched off is lost, so the command lives a little longer than 24 hours of real time.
   - None of this stops an attacker-controlled target device from refusing the command.
+  - **Found while building stage one (needs a decision):** anyone forwarding an aged item, including a non-member relay, can drop the last hops so the item looks younger. The remaining hops still verify. This applies to objection-window proposals as well as scramble commands.
   - What this protects against: an honest target device with a wrong clock, and an old command being replayed against a device the owner has since got back. It does not stop an attacker-controlled device from refusing the command, which remains the best-effort limit above.
 
 **Security qualification (password)**
@@ -276,6 +279,6 @@ A disconnected subset **cannot discover revocations that happened elsewhere unti
 
 ## 14. Implementation status
 
-As of November 2026, these group mechanics are **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, isolation fallback groups or remote deletion.
+As of 26 November 2026, **stage one** exists in [`groups/`](../groups/README.md): an unaudited Rust crate with the signed governance events, the rules decided above, the age counter, the password guard and the scramble decision, tested with simulated split meshes. It has no transport, no encryption and no app integration, and it lists the provisional choices it made. Governance events are signed with each member's **libsignal identity key**, the same key used for pairing (decided, user, 26 November 2026), through libsignal's own signing API. Everything else here is still **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, isolation fallback groups or remote deletion.
 
 **Instruction to Codex:** Treat the **Agreed direction** sections as product intent, the **Open** sections as decisions requiring the user's input, and the security qualifications as non-negotiable engineering cautions. Do not silently invent or claim implementation of missing rules.

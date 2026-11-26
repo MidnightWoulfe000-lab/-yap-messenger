@@ -1,0 +1,23 @@
+[package]
+name = "yap-groups"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Experimental, unaudited group governance rules for Yap (stage one: no transport, no encryption)"
+publish = false
+
+[dependencies]
+# Same pinned revision as endpoint/, so members sign with their pairing identity key.
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal.git", rev = "257105c55a7389ca6b1e85185e2769465e6729f1" }
+rand = "=0.9.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "=0.10.9"
+argon2 = "0.5"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+# Password hashing is deliberately slow; keep debug-mode tests quick.
+[profile.dev.package.argon2]
+opt-level = 3
