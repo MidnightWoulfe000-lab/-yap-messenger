@@ -26,7 +26,13 @@ fn replay_reversed(events: &[Event], group: GroupId) -> Log {
 fn arrival_order_does_not_change_the_result() {
     let (mut log, p) = group_of(5, true, true);
     let r = log
-        .append(&p[0], Body::ProposeRevoke { target: p[3].key() })
+        .append(
+            &p[0],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: p[3].key(),
+            },
+        )
         .unwrap();
     let mut left = log.clone();
     let mut right = log.clone();
@@ -86,6 +92,7 @@ fn late_objection_admission_stands_and_objector_is_told() {
         .append(
             &p[3],
             Body::Object {
+                electorate: vec![],
                 proposal,
                 age_ms: 30_000,
                 reason: "Saw them with the police".into(),
@@ -110,7 +117,13 @@ fn late_objection_admission_stands_and_objector_is_told() {
     // The objector can act on it by starting a normal removal vote.
     assert!(state.can_challenge(&p[3].key(), &x.key()));
     let challenge = left
-        .append(&p[3], Body::ProposeRevoke { target: x.key() })
+        .append(
+            &p[3],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: x.key(),
+            },
+        )
         .unwrap();
     assert_eq!(left.is_valid(&challenge), Some(true));
     assert!(
@@ -128,7 +141,13 @@ fn revoked_elsewhere_is_out_after_sync_but_earlier_actions_stand() {
     let mut left = log.clone();
     let mut right = log;
     let r = left
-        .append(&p[0], Body::ProposeRevoke { target: e.key() })
+        .append(
+            &p[0],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: e.key(),
+            },
+        )
         .unwrap();
     left.append(&p[1], Body::VoteRevoke { proposal: r })
         .unwrap();
@@ -180,7 +199,13 @@ fn small_isolated_subset_cannot_reach_a_majority() {
     // Five members; two are cut off and try to revoke a third.
     let (mut log, p) = group_of(5, true, true);
     let r = log
-        .append(&p[3], Body::ProposeRevoke { target: p[0].key() })
+        .append(
+            &p[3],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: p[0].key(),
+            },
+        )
         .unwrap();
     log.append(&p[4], Body::VoteRevoke { proposal: r }).unwrap();
     assert!(log.state().unwrap().is_active(&p[0].key()));
@@ -190,7 +215,13 @@ fn small_isolated_subset_cannot_reach_a_majority() {
 fn large_group_subset_of_three_can_revoke() {
     let (mut log, p) = group_of(7, true, true);
     let r = log
-        .append(&p[4], Body::ProposeRevoke { target: p[0].key() })
+        .append(
+            &p[4],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: p[0].key(),
+            },
+        )
         .unwrap();
     log.append(&p[5], Body::VoteRevoke { proposal: r }).unwrap();
     assert!(log.state().unwrap().is_active(&p[0].key()));

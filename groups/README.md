@@ -9,14 +9,22 @@ cargo test --manifest-path groups/Cargo.toml
 ## What it covers
 
 - **Signing** (`keys.rs`): members sign with their libsignal identity key, the same key the endpoint uses for pairing, through libsignal's own signing API (pinned to the endpoint's revision). Every signed message starts with a label for its purpose, so a group signature cannot pass as a pairing signature. Because libsignal signatures are randomised, an event's hash leaves the signature out. Linking libsignal makes this crate AGPL-3.0-only, like `endpoint/`.
-- **Signed events** (`event.rs`): genesis with two founders, propose, approve, object (with a reason), admit, propose revoke, vote revoke, add device, revoke own device. Every signature covers the group ID. Each event lists the events its author had seen (its parents), which gives an order without trusting any clock.
+- **Signed events** (`event.rs`): genesis with two founders, propose, approve, reject (with a reason), override a rejection, admit, propose revoke, vote revoke, add device, revoke own device, and for admins: add, remove, make or unmake admin, change settings; for collectives: propose and vote on settings; and SuperAdmin election votes. Every signature covers the group ID. Each event lists the events its author had seen (its parents), which gives an order without trusting any clock.
 - **The log and state** (`state.rs`): each event is checked only against its own history, so the result never depends on the order events arrive in. Two devices with the same events always end up with the same group state.
-- **Admission rules:** at least one approval, any objection blocks, and the window is timed by the proposal's age counter. "Independent approval" stops the sponsor's own approval counting from 5 members, and it can be switched off.
+- **Two group types** (rejection review on or off):
+  - **Normal group:** the creator is the SuperAdmin. Admins add and remove members and make admins; only the SuperAdmin removes or demotes an admin, changes the toolkit settings, or switches the group to a collective (which ends every admin role). There are no objections and no window: the sponsor approves and admits straight away.
+  - **Collective:** no admins. Members vote on any settings change by majority; switching rejection review off makes a normal group, which then elects a SuperAdmin.
+- **Admission rules:** at least one approval, and the window is timed by the proposal's age counter. "Independent approval" stops the sponsor's own approval counting from 5 members, and it can be switched off.
+- **Rejection review** (collectives, and normal groups while they have no SuperAdmin): a rejection needs a reason and keeps the person out until enough other members override it (the same number as a removal vote, the rejecter not counted). The override has a fresh window, timed by the rejection's own age, and anyone can reject again during it; the sponsor's Admit has to answer every rejection it has seen.
+- **SuperAdmin:** can always be voted out, even with group revoking off, by a majority of the other members in any size of group. The seat then opens an election straight away: anyone can stand, each member votes once, and a majority wins. Until then the group works as a collective, and every admin goes back to being a normal member who must be made admin again.
+- **Active in the last 30 days** (`activity.rs`): each phone keeps its own record of when it last received a message or group event from each member, by its own clock. Whoever starts a majority vote (a removal, a rejection, a settings vote) puts the list of members their phone saw as active into it. Majorities count from that list and only people on it can vote; a SuperAdmin election uses the list of the vote that emptied the seat. `check_electorate` compares someone else's list with this phone's records so the app can warn about differences. The vote's list always wins (user, 26 November 2026): a difference never changes the count.
+- **Runoff:** if two parts of a split group each vote the SuperAdmin out and elect someone different, the two meet in a new vote on reconnecting. The voters are everyone on either side's list, and only those two can win.
+- **Clashes:** when an admin's decision about a member meets a SuperAdmin decision about the same member that neither had seen, the SuperAdmin's wins and the other is reported as `OverruledBySuperAdmin`. Between ordinary admins, removal wins.
 - **Revocation:** a majority of the other members in groups of up to 5, and 3 approvals from 6. The target is not counted and cannot vote. The whole thing can be switched off at creation. A revoked member can come back through a new proposal, under the normal admission rules.
 - **Join history:** founders see every join; later members see joins from their own onwards.
 - **Age counter** (`age.rs`): signed hops, where only members' time counts.
 - **Password guard** (`password.rs`): at least 8 characters, Argon2id hash, 5 tries then a 30-minute cooldown that grows by 30 minutes each lockout, changeable, no recovery.
-- **Scramble decision** (`scramble.rs`): an owner trigger with the password wipes all Yap data. A group trigger needs a revocation the device can check itself in a group created with "group scramble" on, and wipes that group only. There is no individual opt-out. Commands expire at 24 hours of age.
+- **Scramble decision** (`scramble.rs`): an owner trigger with the password wipes all Yap data. A group trigger needs a revocation the device can check itself in a group created with "group scramble" on, and wipes that group only. There is no individual opt-out. Removal by an admin never triggers it: scramble is a toolkit tool and follows only a group vote. Commands expire at 24 hours of age.
 
 ## Not decided here
 
@@ -30,6 +38,9 @@ Where the specification is still open, the crate either leaves the feature out o
 - **Group size for a revocation vote** is counted when the vote starts.
 - **Coming back after revocation** (decided: through a new proposal) keeps the earlier membership on record, keeps every old device revoked, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
 - **Owner scramble** is available whenever the device has a password set; there is no separate opt-in.
+- **Every vote's voters are its list.** Only members on a vote's list may vote on it, including in groups of 6 or more where removal needs a fixed 3 votes.
+- **An empty list counts every current member.** That can only make a vote harder to pass, so a phone with no activity records is never at an advantage.
+- **A list holds at most 128 members**, so a vote in a larger group cannot yet name everyone active.
 
 ## Known weakness (accepted)
 

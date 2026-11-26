@@ -13,10 +13,15 @@ pub fn group_id() -> GroupId {
     GroupId([7; 16])
 }
 
-/// A new group with founders `a` and `b`, a 1-minute objection window and
-/// group scramble on.
+/// A new collective with founders `a` and `b`, a 1-minute objection window
+/// and group scramble on.
 pub fn new_group(independent_approval: bool, group_revoking: bool) -> (Log, Identity, Identity) {
-    new_group_with(Settings::new(1, independent_approval, group_revoking, true).unwrap())
+    new_group_with(Settings::new(1, independent_approval, group_revoking, true, true).unwrap())
+}
+
+/// A normal group: `a` is the creator and SuperAdmin.
+pub fn normal_group(group_revoking: bool) -> (Log, Identity, Identity) {
+    new_group_with(Settings::new(1, true, group_revoking, true, false).unwrap())
 }
 
 pub fn new_group_with(settings: Settings) -> (Log, Identity, Identity) {
@@ -59,6 +64,7 @@ pub fn admit(log: &mut Log, sponsor: &Identity, proposal: Hash) -> Hash {
         Body::Admit {
             proposal,
             age_ms: WINDOW_MS,
+            rejection_ages: vec![],
         },
     )
     .unwrap()

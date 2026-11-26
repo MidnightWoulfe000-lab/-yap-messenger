@@ -48,7 +48,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - **Override time:** a **fresh window** of the group's chosen length starts when the rejection is signed, timed by the age counter. If the override has not passed by the end, the rejection stands.
   - **With rejection review switched off:** there is **no objection** step at all, and **the sponsor can approve** the person themselves. Instead the group has **admins**: the creator, plus members the creator deputises, with admin powers comparable to WhatsApp and similar apps. This is the conventional model, for groups that choose it.
   - This replaces point 5 above ("any objection overrides an approval"): with review on, a rejection can be overridden; with review off, there are no objections.
-  - Not yet built in stage one, which still uses the earlier rule that any objection blocks.
+  - Built in `groups/` (stage one), with the provisional choices listed in its README.
 - **Admins (user, 26 November 2026)**, only in groups with rejection review switched off:
   - **Powers:** every admin can **add members**, **remove members**, **make or unmake admins** and **change group settings**.
   - **The creator is protected:** other admins cannot remove the creator or take away their admin role. The only way to remove the creator is a **normal removal vote** (§5), and only if the group has **group revoking** switched on. The same applies to a later SuperAdmin (below).
@@ -59,17 +59,20 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - **Measuring "active in the last 30 days" (proposed by Claude, accepted by user, 26 November 2026):**
   - **Sending a message or signing a group event** counts as activity (the user suggested messages).
   - Each phone dates it by **when it received it**, not by the time the sender's phone put on it, because the sender's clock can be wrong or faked (for example dated 60 days ahead to look active for longer).
-  - The removal vote carries the list of members its proposer's phone saw as active, and other phones check it against their own records, so every phone counts the same people.
+  - The removal vote carries the list of members its proposer's phone saw as active, and every phone counts from that list, so every phone counts the same people. **If a phone's own records disagree with the list, the vote's list wins** (user, 26 November 2026): the phone still counts from the list and may only warn its user.
   - **SuperAdmin (user, 26 November 2026):** the creator is the **SuperAdmin**. If the creator leaves or is removed, the admin the members vote in becomes the new SuperAdmin, with **the same protection** as the creator. There is one SuperAdmin at a time.
   - **Only the SuperAdmin can change the toolkit settings** (rejection review, Independent approval, group revoking, group scramble, and the objection window). Other admins cannot touch them. Normal groups have no objections, so the objection window is a toolkit setting too.
   - **Only the SuperAdmin can overrule another admin's decision.**
   - **Removing the SuperAdmin (user, 26 November 2026):** always possible, **even with group revoking switched off**. Any member can propose a removal vote, and it passes if a **majority of the members active in the last 30 days** accepts it. If it passes, the members must **vote in a new SuperAdmin straight away**.
 - **Two group types (user, 26 November 2026):**
-  - **Normal group:** admins and a SuperAdmin, as above, and no objections. The sponsor or an admin admits new members.
+  - **Normal group:** admins and a SuperAdmin, as above, and no objections. The sponsor or an admin admits new members, with **no window to wait for** (user, 26 November 2026).
+  - **Removal by an admin never triggers group scramble** (user, 26 November 2026). Scramble is a toolkit tool and follows only a removal by group vote.
   - **Collective** (name proposed by Claude, needs confirming): no admins and no SuperAdmin. New members go through rejection review, and removals go through the removal vote (§5).
   - Switching rejection review on turns a normal group into a collective, and every admin role ends.
   - **Back to a normal group (user, 26 November 2026):** a collective has no SuperAdmin, so it turns back into a normal group by a **member vote to switch rejection review off**. A SuperAdmin is then elected as below.
+  - **A collective votes on any settings change** this way, not only switching rejection review off (user, 26 November 2026).
 - **Electing a SuperAdmin (user, 26 November 2026):**
+  - When the SuperAdmin is removed, **every admin goes back to being a normal member** while the group works as a collective, and must be made admin again afterwards (user, 26 November 2026).
   - **Anyone** in the group can stand, and the winner needs a **majority**.
   - Until a new SuperAdmin is chosen, the group **works as a collective**.
   - If two isolated parts of the group each elect a SuperAdmin and then reconnect, there is a **new vote with those two as the only candidates**.
@@ -133,7 +136,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - In groups of 2–3 members a majority can be just 2 people. **Confirmed as intended.**
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
   - **Updated (user, 26 November 2026): every majority vote counts only members active in the last 30 days** (measured as in §3). This applies to removal votes in groups of up to 5, overriding a rejection, removing or electing a SuperAdmin, and switching a collective back to a normal group. Members who have not been active are left out of the count. The fixed threshold of 3 approvals in groups of 6 or more is unchanged.
-  - Stage one in `groups/` still counts all current members; it has no record of messages yet, so it cannot tell who has been active.
+  - Built in `groups/`: each vote carries the list of members its proposer's phone saw as active, majorities count from that list, and only members on it can vote. If a phone's own records disagree with the list, **the vote's list wins** (user, 26 November 2026); the phone can show a warning but counts from the list.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
   - Details stage one chose (need confirming): the earlier membership stays on record; every device they had before stays revoked, so they must add devices afresh; and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
@@ -333,6 +336,6 @@ A disconnected subset **cannot discover revocations that happened elsewhere unti
 
 ## 14. Implementation status
 
-As of 26 November 2026, **stage one** exists in [`groups/`](../groups/README.md): an unaudited Rust crate with the signed governance events, the rules decided above, the age counter, the password guard and the scramble decision, tested with simulated split meshes. It has no transport, no encryption and no app integration, and it lists the provisional choices it made. Governance events are signed with each member's **libsignal identity key**, the same key used for pairing (decided, user, 26 November 2026), through libsignal's own signing API. Everything else here is still **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, isolation fallback groups or remote deletion.
+As of 26 November 2026, **stage one** exists in [`groups/`](../groups/README.md): an unaudited Rust crate with the signed governance events, the rules decided above, the age counter, the password guard and the scramble decision, tested with simulated split meshes. It has no transport, no encryption and no app integration, and it lists the provisional choices it made. Governance events are signed with each member's **libsignal identity key**, the same key used for pairing (decided, user, 26 November 2026), through libsignal's own signing API. It also covers the two group types, rejection review, admins, the SuperAdmin, SuperAdmin removal and election with the runoff after a split, the clash rule, and majorities counted from members active in the last 30 days. Everything else here is still **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, isolation fallback groups or remote deletion.
 
 **Instruction to Codex:** Treat the **Agreed direction** sections as product intent, the **Open** sections as decisions requiring the user's input, and the security qualifications as non-negotiable engineering cautions. Do not silently invent or claim implementation of missing rules.

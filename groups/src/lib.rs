@@ -9,6 +9,7 @@
 //! Rules the specification still marks as open are either left out or surfaced
 //! as [`Warning`]s rather than decided here. See `groups/README.md`.
 
+pub mod activity;
 mod error;
 mod wire;
 
@@ -19,13 +20,15 @@ pub mod password;
 pub mod scramble;
 pub mod state;
 
+pub use activity::{ActivityLog, ElectorateCheck, ACTIVE_WINDOW_MS};
 pub use age::{AgedItem, Hop};
 pub use error::{Error, Result};
-pub use event::{Body, Event, GroupId, Hash, JoinRequest, Settings};
+pub use event::{Body, Event, GroupId, GroupType, Hash, JoinRequest, Settings};
 pub use keys::{DeviceKey, Identity, MemberKey};
 pub use password::{Check, PasswordGuard};
 pub use scramble::{Decision, Rejection, Scope, ScrambleCommand, ScrambleGuard, Trigger};
 pub use state::{
-    revocation_threshold, EarlierTerm, GroupState, JoinProposal, JoinRecord, Log, Member,
-    MemberStatus, Objection, Revocation, Warning,
+    majority, revocation_threshold, super_admin_removal_threshold, EarlierTerm, Election,
+    GroupState, JoinProposal, JoinRecord, Log, Member, MemberStatus, Objection, Revocation,
+    SettingsVote, Warning,
 };

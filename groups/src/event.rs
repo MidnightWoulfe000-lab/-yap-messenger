@@ -9,8 +9,12 @@ use sha2::{Digest, Sha256};
 pub type Hash = [u8; 32];
 
 pub const MAX_PARENTS: usize = 16;
+/// Most rejections one admission can answer.
+pub const MAX_REJECTIONS: usize = 16;
 pub const MAX_REASON_BYTES: usize = 1000;
-pub const MAX_EVENT_BYTES: usize = 4096;
+pub const MAX_EVENT_BYTES: usize = 8192;
+/// Most members one vote's electorate can list.
+pub const MAX_ELECTORATE: usize = 128;
 pub const MIN_OBJECTION_WINDOW_MINUTES: u64 = 1;
 pub const MAX_OBJECTION_WINDOW_MINUTES: u64 = 60;
 
@@ -46,6 +50,18 @@ pub struct Settings {
     /// individual opt-out; joining a group with it on is the consent (§6).
     /// It has no effect while `group_revoking` is off.
     pub group_scramble: bool,
+    /// "Rejection review": on makes the group a collective, with no admins;
+    /// off makes it a normal group, with admins and a SuperAdmin (§3).
+    pub rejection_review: bool,
+}
+
+/// The two kinds of group (§3). Set by [`Settings::rejection_review`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GroupType {
+    /// Admins and a SuperAdmin, and no objections.
+    Normal,
+    /// No admins; new members go through rejection review.
+    Collective,
 }
 
 impl Settings {
@@ -54,6 +70,7 @@ impl Settings {
         independent_approval: bool,
         group_revoking: bool,
         group_scramble: bool,
+        rejection_review: bool,
     ) -> Result<Self> {
         if !(MIN_OBJECTION_WINDOW_MINUTES..=MAX_OBJECTION_WINDOW_MINUTES)
             .contains(&objection_window_minutes)
@@ -65,6 +82,7 @@ impl Settings {
             independent_approval,
             group_revoking,
             group_scramble,
+            rejection_review,
         })
     }
 
@@ -72,20 +90,35 @@ impl Settings {
         self.objection_window_ms
     }
 
+    pub fn group_type(&self) -> GroupType {
+        if self.rejection_review {
+            GroupType::Collective
+        } else {
+            GroupType::Normal
+        }
+    }
+
     fn encode(&self, w: &mut Writer) {
         w.u64(self.objection_window_ms / MINUTE_MS);
         w.u8(self.independent_approval as u8
             | (self.group_revoking as u8) << 1
-            | (self.group_scramble as u8) << 2);
+            | (self.group_scramble as u8) << 2
+            | (self.rejection_review as u8) << 3);
     }
 
     fn decode(r: &mut Reader) -> Result<Self> {
         let minutes = r.u64()?;
         let flags = r.u8()?;
-        if flags & !0b111 != 0 {
+        if flags & !0b1111 != 0 {
             return Err(Error::Malformed("unknown settings flag"));
         }
-        Self::new(minutes, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0)
+        Self::new(
+            minutes,
+            flags & 1 != 0,
+            flags & 2 != 0,
+            flags & 4 != 0,
+            flags & 8 != 0,
+        )
     }
 }
 
@@ -153,20 +186,73 @@ pub enum Body {
         proposal: Hash,
         age_ms: u64,
     },
-    /// An objection blocks admission and must give a reason (§3).
+    /// A rejection (collectives only). It must give a reason, and keeps the
+    /// person out unless the other members override it (§3).
     Object {
         proposal: Hash,
         age_ms: u64,
         reason: String,
+        /// Members active in the last 30 days by the author's phone, sorted.
+        /// Majorities count from this list, and only its members may vote.
+        /// Empty means every current member, which is never easier to pass.
+        electorate: Vec<MemberKey>,
+    },
+    /// A vote to let the person in despite one rejection. `age_ms` is the
+    /// rejection's own age counter: the override has a fresh window.
+    Override {
+        proposal: Hash,
+        rejection: Hash,
+        age_ms: u64,
     },
     /// Issued by the sponsor once the window has passed on its own copy.
+    /// `rejection_ages` gives the age of every rejection the sponsor has
+    /// seen, each of whose override windows must also have passed.
     Admit {
         proposal: Hash,
         age_ms: u64,
+        rejection_ages: Vec<(Hash, u64)>,
+    },
+    /// An admin of a normal group lets someone in directly.
+    AdminAdd {
+        request: JoinRequest,
+    },
+    /// An admin of a normal group removes a member.
+    AdminRemove {
+        target: MemberKey,
+    },
+    /// An admin makes someone an admin, or the SuperAdmin takes it away.
+    SetAdmin {
+        target: MemberKey,
+        admin: bool,
+    },
+    /// The SuperAdmin changes the toolkit settings.
+    ChangeSettings {
+        settings: Settings,
+    },
+    /// A collective's members vote on new settings. The author supports it.
+    ProposeSettings {
+        settings: Settings,
+        /// Members active in the last 30 days by the author's phone, sorted.
+        /// Majorities count from this list, and only its members may vote.
+        /// Empty means every current member, which is never easier to pass.
+        electorate: Vec<MemberKey>,
+    },
+    VoteSettings {
+        proposal: Hash,
+    },
+    /// A vote for the next SuperAdmin. `vacancy` is the event that left the
+    /// seat empty.
+    ElectSuperAdmin {
+        vacancy: Hash,
+        candidate: MemberKey,
     },
     /// Starts a group vote to revoke a member. The proposer's support counts.
     ProposeRevoke {
         target: MemberKey,
+        /// Members active in the last 30 days by the author's phone, sorted.
+        /// Majorities count from this list, and only its members may vote.
+        /// Empty means every current member, which is never easier to pass.
+        electorate: Vec<MemberKey>,
     },
     VoteRevoke {
         proposal: Hash,
@@ -201,20 +287,32 @@ impl Body {
                 proposal,
                 age_ms,
                 reason,
+                electorate,
             } => {
                 w.u8(4);
                 w.fixed(proposal);
                 w.u64(*age_ms);
                 w.var(reason.as_bytes());
+                encode_electorate(w, electorate);
             }
-            Body::Admit { proposal, age_ms } => {
+            Body::Admit {
+                proposal,
+                age_ms,
+                rejection_ages,
+            } => {
                 w.u8(5);
                 w.fixed(proposal);
                 w.u64(*age_ms);
+                w.u8(rejection_ages.len() as u8);
+                for (rejection, age) in rejection_ages {
+                    w.fixed(rejection);
+                    w.u64(*age);
+                }
             }
-            Body::ProposeRevoke { target } => {
+            Body::ProposeRevoke { target, electorate } => {
                 w.u8(6);
                 w.fixed(&target.0);
+                encode_electorate(w, electorate);
             }
             Body::VoteRevoke { proposal } => {
                 w.u8(7);
@@ -227,6 +325,50 @@ impl Body {
             Body::RevokeOwnDevice { device } => {
                 w.u8(9);
                 w.fixed(&device.0);
+            }
+            Body::Override {
+                proposal,
+                rejection,
+                age_ms,
+            } => {
+                w.u8(10);
+                w.fixed(proposal);
+                w.fixed(rejection);
+                w.u64(*age_ms);
+            }
+            Body::AdminAdd { request } => {
+                w.u8(11);
+                request.encode(w);
+            }
+            Body::AdminRemove { target } => {
+                w.u8(12);
+                w.fixed(&target.0);
+            }
+            Body::SetAdmin { target, admin } => {
+                w.u8(13);
+                w.fixed(&target.0);
+                w.u8(*admin as u8);
+            }
+            Body::ChangeSettings { settings } => {
+                w.u8(14);
+                settings.encode(w);
+            }
+            Body::ProposeSettings {
+                settings,
+                electorate,
+            } => {
+                w.u8(15);
+                settings.encode(w);
+                encode_electorate(w, electorate);
+            }
+            Body::VoteSettings { proposal } => {
+                w.u8(16);
+                w.fixed(proposal);
+            }
+            Body::ElectSuperAdmin { vacancy, candidate } => {
+                w.u8(17);
+                w.fixed(vacancy);
+                w.fixed(&candidate.0);
             }
         }
     }
@@ -249,13 +391,35 @@ impl Body {
                 age_ms: r.u64()?,
                 reason: String::from_utf8(r.var(MAX_REASON_BYTES)?.to_vec())
                     .map_err(|_| Error::Malformed("reason is not UTF-8"))?,
+                electorate: decode_electorate(r)?,
             },
-            5 => Body::Admit {
-                proposal: r.array()?,
-                age_ms: r.u64()?,
-            },
+            5 => {
+                let proposal = r.array()?;
+                let age_ms = r.u64()?;
+                let count = r.u8()? as usize;
+                if count > MAX_REJECTIONS {
+                    return Err(Error::Malformed("too many rejections"));
+                }
+                let mut rejection_ages: Vec<(Hash, u64)> = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let rejection: Hash = r.array()?;
+                    if rejection_ages
+                        .last()
+                        .is_some_and(|(last, _)| *last >= rejection)
+                    {
+                        return Err(Error::Malformed("rejections not in canonical order"));
+                    }
+                    rejection_ages.push((rejection, r.u64()?));
+                }
+                Body::Admit {
+                    proposal,
+                    age_ms,
+                    rejection_ages,
+                }
+            }
             6 => Body::ProposeRevoke {
                 target: MemberKey(r.array()?),
+                electorate: decode_electorate(r)?,
             },
             7 => Body::VoteRevoke {
                 proposal: r.array()?,
@@ -266,11 +430,70 @@ impl Body {
             9 => Body::RevokeOwnDevice {
                 device: DeviceKey(r.array()?),
             },
+            10 => Body::Override {
+                proposal: r.array()?,
+                rejection: r.array()?,
+                age_ms: r.u64()?,
+            },
+            11 => Body::AdminAdd {
+                request: JoinRequest::decode(r)?,
+            },
+            12 => Body::AdminRemove {
+                target: MemberKey(r.array()?),
+            },
+            13 => Body::SetAdmin {
+                target: MemberKey(r.array()?),
+                admin: match r.u8()? {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(Error::Malformed("bad admin flag")),
+                },
+            },
+            14 => Body::ChangeSettings {
+                settings: Settings::decode(r)?,
+            },
+            15 => Body::ProposeSettings {
+                settings: Settings::decode(r)?,
+                electorate: decode_electorate(r)?,
+            },
+            16 => Body::VoteSettings {
+                proposal: r.array()?,
+            },
+            17 => Body::ElectSuperAdmin {
+                vacancy: r.array()?,
+                candidate: MemberKey(r.array()?),
+            },
             _ => return Err(Error::Malformed("unknown event type")),
         })
     }
 
+    /// The electorate a vote names, if this event starts one.
+    pub fn electorate(&self) -> Option<&[MemberKey]> {
+        match self {
+            Body::Object { electorate, .. }
+            | Body::ProposeRevoke { electorate, .. }
+            | Body::ProposeSettings { electorate, .. } => Some(electorate),
+            _ => None,
+        }
+    }
+
     fn check(&self) -> Result<()> {
+        if let Some(electorate) = self.electorate() {
+            if electorate.len() > MAX_ELECTORATE {
+                return Err(Error::Malformed("electorate too large"));
+            }
+            if electorate.windows(2).any(|w| w[0] >= w[1]) {
+                return Err(Error::Malformed("electorate not in canonical order"));
+            }
+        }
+        if let Body::Admit { rejection_ages, .. } = self {
+            if rejection_ages.len() > MAX_REJECTIONS {
+                return Err(Error::Malformed("too many rejections"));
+            }
+            if rejection_ages.windows(2).any(|w| w[0].0 >= w[1].0) {
+                return Err(Error::Malformed("rejections not in canonical order"));
+            }
+        }
         if let Body::Object { reason, .. } = self {
             if reason.trim().is_empty() {
                 return Err(Error::Malformed("an objection needs a reason"));
@@ -281,6 +504,29 @@ impl Body {
         }
         Ok(())
     }
+}
+
+fn encode_electorate(w: &mut Writer, electorate: &[MemberKey]) {
+    w.u8(electorate.len() as u8);
+    for member in electorate {
+        w.fixed(&member.0);
+    }
+}
+
+fn decode_electorate(r: &mut Reader) -> Result<Vec<MemberKey>> {
+    let count = r.u8()? as usize;
+    if count > MAX_ELECTORATE {
+        return Err(Error::Malformed("electorate too large"));
+    }
+    let mut out: Vec<MemberKey> = Vec::with_capacity(count);
+    for _ in 0..count {
+        let member = MemberKey(r.array()?);
+        if out.last().is_some_and(|last| *last >= member) {
+            return Err(Error::Malformed("electorate not in canonical order"));
+        }
+        out.push(member);
+    }
+    Ok(out)
 }
 
 /// A signed governance event. `parents` are the latest events the author had

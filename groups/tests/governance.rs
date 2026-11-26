@@ -14,10 +14,10 @@ fn founders_join_without_approval() {
 
 #[test]
 fn window_must_be_one_to_sixty_minutes() {
-    assert!(Settings::new(0, true, true, true).is_err());
-    assert!(Settings::new(61, true, true, true).is_err());
+    assert!(Settings::new(0, true, true, true, true).is_err());
+    assert!(Settings::new(61, true, true, true, true).is_err());
     assert_eq!(
-        Settings::new(60, true, true, true)
+        Settings::new(60, true, true, true, true)
             .unwrap()
             .objection_window_ms(),
         3_600_000
@@ -42,6 +42,7 @@ fn third_member_needs_an_approval_and_the_window() {
             Body::Admit {
                 proposal: p,
                 age_ms: WINDOW_MS - 1,
+                rejection_ages: vec![],
             },
         )
         .unwrap();
@@ -73,6 +74,7 @@ fn any_objection_blocks_admission() {
         .append(
             &b,
             Body::Object {
+                electorate: vec![],
                 proposal: p,
                 age_ms: EARLY,
                 reason: "Not someone I know".into(),
@@ -98,6 +100,7 @@ fn objection_needs_a_reason() {
         log.group(),
         log.heads(),
         Body::Object {
+            electorate: vec![],
             proposal: [0; 32],
             age_ms: EARLY,
             reason: "   ".into(),
@@ -114,6 +117,7 @@ fn votes_after_the_window_do_not_count() {
         .append(
             &b,
             Body::Object {
+                electorate: vec![],
                 proposal: p,
                 age_ms: WINDOW_MS,
                 reason: "late".into(),
@@ -169,7 +173,15 @@ fn revocation_thresholds() {
 fn five_member_group_needs_three_of_the_other_four() {
     let (mut log, p) = group_of(5, true, true);
     let target = p[4].key();
-    let r = log.append(&p[0], Body::ProposeRevoke { target }).unwrap();
+    let r = log
+        .append(
+            &p[0],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target,
+            },
+        )
+        .unwrap();
     log.append(&p[1], Body::VoteRevoke { proposal: r }).unwrap();
     assert!(log.state().unwrap().is_active(&target));
 
@@ -189,7 +201,13 @@ fn five_member_group_needs_three_of_the_other_four() {
 fn two_member_group_other_member_alone_revokes() {
     let (mut log, a, b) = new_group(true, true);
     let r = log
-        .append(&a, Body::ProposeRevoke { target: b.key() })
+        .append(
+            &a,
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: b.key(),
+            },
+        )
         .unwrap();
     assert!(!log.state().unwrap().is_active(&b.key()));
     assert!(log.state().unwrap().revocations[&r].carried);
@@ -199,7 +217,13 @@ fn two_member_group_other_member_alone_revokes() {
 fn group_revoking_switched_off() {
     let (mut log, a, b) = new_group(true, false);
     let r = log
-        .append(&a, Body::ProposeRevoke { target: b.key() })
+        .append(
+            &a,
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: b.key(),
+            },
+        )
         .unwrap();
     assert_eq!(log.is_valid(&r), Some(false));
     assert!(log.state().unwrap().is_active(&b.key()));
@@ -210,6 +234,7 @@ fn revoke(log: &mut Log, proposer: &Identity, voter: &Identity, target: &Identit
         .append(
             proposer,
             Body::ProposeRevoke {
+                electorate: vec![],
                 target: target.key(),
             },
         )
@@ -248,6 +273,7 @@ fn revoked_member_can_come_back_through_a_new_proposal() {
     log.append(
         &p[0],
         Body::Object {
+            electorate: vec![],
             proposal: blocked,
             age_ms: EARLY,
             reason: "Not yet".into(),
@@ -336,7 +362,10 @@ fn forged_tampered_and_foreign_events_are_rejected() {
         &b,
         log.group(),
         log.heads(),
-        Body::ProposeRevoke { target: a.key() },
+        Body::ProposeRevoke {
+            electorate: vec![],
+            target: a.key(),
+        },
     )
     .unwrap();
 
@@ -353,7 +382,10 @@ fn forged_tampered_and_foreign_events_are_rejected() {
         &b,
         GroupId([9; 16]),
         log.heads(),
-        Body::ProposeRevoke { target: a.key() },
+        Body::ProposeRevoke {
+            electorate: vec![],
+            target: a.key(),
+        },
     )
     .unwrap();
     assert_eq!(log.insert(foreign), Err(Error::WrongGroup));
@@ -395,7 +427,10 @@ fn events_round_trip_through_bytes() {
 fn signing_twice_gives_one_event_hash() {
     // libsignal signatures are randomised; the hash must not depend on them.
     let (log, a, b) = new_group(true, true);
-    let body = Body::ProposeRevoke { target: b.key() };
+    let body = Body::ProposeRevoke {
+        electorate: vec![],
+        target: b.key(),
+    };
     let first = Event::create(&a, log.group(), log.heads(), body.clone()).unwrap();
     let second = Event::create(&a, log.group(), log.heads(), body).unwrap();
     assert_ne!(first.signature, second.signature);
@@ -419,7 +454,7 @@ fn a_second_genesis_is_refused() {
         log.group(),
         vec![],
         Body::Genesis {
-            settings: Settings::new(5, true, true, false).unwrap(),
+            settings: Settings::new(5, true, true, false, true).unwrap(),
             second: JoinRequest::sign(&b, log.group()),
         },
     )

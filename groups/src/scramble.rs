@@ -7,7 +7,7 @@
 //! - Owner-triggered: needs the device's password; wipes **all Yap data**.
 //! - Group-triggered: needs a revocation the device can verify in its own
 //!   synced copy of the group log, in a group created with "group scramble"
-//!   on; wipes **that group only**. There is no individual opt-out: joining
+//!   on; wipes **that group only**. Removal by an admin never triggers it. There is no individual opt-out: joining
 //!   a group with the setting on is the consent.
 //! - Either way the command is dropped once its age reaches 24 hours.
 //!
@@ -123,6 +123,8 @@ pub enum Rejection {
     NotRevoked,
     /// The group was created with "group scramble" off.
     GroupScrambleOff,
+    /// The member was removed by an admin, not by a group vote.
+    NotAVote,
 }
 
 /// Lives on each device and decides what to do with incoming commands.
@@ -198,6 +200,11 @@ impl ScrambleGuard {
                 }
                 if !state.settings.group_scramble {
                     return Reject(Rejection::GroupScrambleOff);
+                }
+                // Scramble is a toolkit tool: it follows a group vote, never
+                // an admin's decision on their own (§6).
+                if !state.revocations.get(revocation).is_some_and(|r| r.carried) {
+                    return Reject(Rejection::NotAVote);
                 }
                 Scope::Group(*id)
             }

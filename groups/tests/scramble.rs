@@ -188,6 +188,7 @@ fn group_scramble_needs_a_verified_revocation() {
         .append(
             &p[0],
             Body::ProposeRevoke {
+                electorate: vec![],
                 target: target.key(),
             },
         )
@@ -210,11 +211,17 @@ fn group_scramble_needs_a_verified_revocation() {
 #[test]
 fn group_scramble_follows_the_group_setting() {
     for setting in [true, false] {
-        let (mut log, a, b) = new_group_with(Settings::new(1, true, true, setting).unwrap());
+        let (mut log, a, b) = new_group_with(Settings::new(1, true, true, setting, true).unwrap());
         let c = id(3);
         add(&mut log, &a, &b, &c);
         let r = log
-            .append(&a, Body::ProposeRevoke { target: c.key() })
+            .append(
+                &a,
+                Body::ProposeRevoke {
+                    electorate: vec![],
+                    target: c.key(),
+                },
+            )
             .unwrap();
         log.append(&b, Body::VoteRevoke { proposal: r }).unwrap();
 
@@ -237,7 +244,13 @@ fn old_group_scramble_does_not_apply_after_coming_back() {
     let (mut log, p) = group_of(3, true, true);
     let c = &p[2];
     let r = log
-        .append(&p[0], Body::ProposeRevoke { target: c.key() })
+        .append(
+            &p[0],
+            Body::ProposeRevoke {
+                electorate: vec![],
+                target: c.key(),
+            },
+        )
         .unwrap();
     log.append(&p[1], Body::VoteRevoke { proposal: r }).unwrap();
     add(&mut log, &p[0], &p[1], c);
@@ -247,6 +260,25 @@ fn old_group_scramble_does_not_apply_after_coming_back() {
     assert_eq!(
         guard.handle(&command, 0, 0, Some(&log.state().unwrap())),
         Decision::Reject(Rejection::NotRevoked)
+    );
+}
+
+#[test]
+fn removal_by_an_admin_never_scrambles() {
+    let (mut log, a, _) = normal_group(true);
+    let c = id(3);
+    let request = JoinRequest::sign(&c, log.group());
+    log.append(&a, Body::AdminAdd { request }).unwrap();
+    let removal = log
+        .append(&a, Body::AdminRemove { target: c.key() })
+        .unwrap();
+    assert!(!log.state().unwrap().is_active(&c.key()));
+
+    let mut guard = ScrambleGuard::new(DeviceKey([4; 32]), c.key(), None);
+    let command = ScrambleCommand::group(guard.device, log.group(), removal);
+    assert_eq!(
+        guard.handle(&command, 0, 0, Some(&log.state().unwrap())),
+        Decision::Reject(Rejection::NotAVote)
     );
 }
 
