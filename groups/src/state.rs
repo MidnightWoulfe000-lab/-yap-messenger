@@ -5,10 +5,11 @@
 //! arrival order, and two devices holding the same set of events derive the
 //! same state, whatever order they received them in.
 //!
-//! When events from different sides of a split mesh meet, some combinations
-//! are not yet settled by the specification (§3 late objections, §8 votes by
-//! members revoked elsewhere). Those are reported as [`Warning`]s and not
-//! resolved here.
+//! When events from different sides of a split mesh meet, the result is
+//! reported as a [`Warning`]. A late objection (§3) is decided: the admission
+//! stands and the objector is told. A member revoked elsewhere (§8) is out
+//! as soon as the revocation reaches a device; what they did before that
+//! stands.
 
 use crate::event::{Body, Event, GroupId, Hash, Settings, MAX_PARENTS};
 use crate::keys::{DeviceKey, Identity, MemberKey};
@@ -99,16 +100,25 @@ pub struct Revocation {
     pub carried: bool,
 }
 
-/// Situations the specification has not resolved yet. The UI should show them;
-/// this crate does not decide them.
+/// Things that happened across a split mesh which people need to be told
+/// about. See [`GroupState::notices_for`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Warning {
     /// A valid objection that the sponsor had not seen when it admitted the
     /// member, for example because it came from the other side of a split
-    /// mesh. The admission stands for now (§3 open question).
-    LateObjection { proposal: Hash, objection: Hash },
+    /// mesh. Decided (§3): the admission stands, and the objector gets a
+    /// notice saying what happened, with the option of starting a vote to
+    /// remove the member.
+    LateObjection {
+        proposal: Hash,
+        objection: Hash,
+        objector: MemberKey,
+        admitted: MemberKey,
+    },
     /// A valid event whose author was revoked elsewhere without knowing it.
-    /// It still took effect (§8 open question).
+    /// Decided (§8): it stands, and so do their messages from before the
+    /// sync. Once the revocation is in an event's own history, that author's
+    /// events are refused, so they are out from the sync onwards.
     ActedWhileRevoked { event: Hash, author: MemberKey },
 }
 
@@ -124,6 +134,25 @@ pub struct GroupState {
 }
 
 impl GroupState {
+    /// Notices for one member: late objections they raised. The app shows
+    /// each with the option of starting a removal vote against the admitted
+    /// member, which is only possible while they are still active and the
+    /// group has group revoking on.
+    pub fn notices_for(&self, member: &MemberKey) -> Vec<&Warning> {
+        self.warnings
+            .iter()
+            .filter(|w| matches!(w, Warning::LateObjection { objector, .. } if objector == member))
+            .collect()
+    }
+
+    /// Whether `objector` can act on a late-objection notice now.
+    pub fn can_challenge(&self, objector: &MemberKey, admitted: &MemberKey) -> bool {
+        self.settings.group_revoking
+            && self.is_active(objector)
+            && self.is_active(admitted)
+            && objector != admitted
+    }
+
     /// The revocation behind a member's current removal, if any.
     pub fn revoked_by(&self, key: &MemberKey) -> Option<Hash> {
         match self.members.get(key)?.status {
@@ -532,6 +561,8 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
                     state.warnings.push(Warning::LateObjection {
                         proposal: *proposal,
                         objection: hash,
+                        objector: author,
+                        admitted: p.candidate,
                     });
                 }
                 p.objections.push(Objection {
@@ -562,6 +593,8 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
                 state.warnings.push(Warning::LateObjection {
                     proposal: *proposal,
                     objection: o.event,
+                    objector: o.objector,
+                    admitted: p.candidate,
                 });
             }
             let mut member = Member {

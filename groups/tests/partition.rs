@@ -72,7 +72,7 @@ fn both_sides_converge_after_reconnecting() {
 }
 
 #[test]
-fn objection_from_the_other_side_is_flagged_not_decided() {
+fn late_objection_admission_stands_and_objector_is_told() {
     // A proposes X. B approves and A admits on one side; D objects on the
     // other side without either seeing the other.
     let (mut log, p) = group_of(4, true, true);
@@ -97,18 +97,30 @@ fn objection_from_the_other_side_is_flagged_not_decided() {
     sync(&right, &mut left);
     assert_eq!(left.is_valid(&admitted), Some(true));
     let state = left.state().unwrap();
-    assert!(
-        state.is_active(&x.key()),
-        "admission stands until a rule is chosen"
-    );
-    assert!(state.warnings.contains(&Warning::LateObjection {
+    assert!(state.is_active(&x.key()), "the admission stands");
+    let notice = Warning::LateObjection {
         proposal,
-        objection
-    }));
+        objection,
+        objector: p[3].key(),
+        admitted: x.key(),
+    };
+    assert_eq!(state.notices_for(&p[3].key()), vec![&notice]);
+    assert!(state.notices_for(&p[0].key()).is_empty());
+
+    // The objector can act on it by starting a normal removal vote.
+    assert!(state.can_challenge(&p[3].key(), &x.key()));
+    let challenge = left
+        .append(&p[3], Body::ProposeRevoke { target: x.key() })
+        .unwrap();
+    assert_eq!(left.is_valid(&challenge), Some(true));
+    assert!(
+        left.state().unwrap().is_active(&x.key()),
+        "needs a majority"
+    );
 }
 
 #[test]
-fn acting_while_revoked_elsewhere_is_flagged() {
+fn revoked_elsewhere_is_out_after_sync_but_earlier_actions_stand() {
     // Left side (A, B, C) revokes E. Right side (D, E) carries on, and E keeps
     // acting because it has not heard.
     let (log, p) = group_of(5, true, true);
@@ -141,6 +153,22 @@ fn acting_while_revoked_elsewhere_is_flagged() {
         state.members[&e.key()].status,
         MemberStatus::Revoked { .. }
     ));
+    // What E did before the sync stands.
+    assert_eq!(left.is_valid(&last), Some(true));
+    assert!(state.members[&e.key()]
+        .devices
+        .contains(&DeviceKey([3; 32])));
+    // Once E's side has the revocation, E is out.
+    sync(&left, &mut right);
+    let after = right
+        .append(
+            e,
+            Body::AddDevice {
+                device: DeviceKey([9; 32]),
+            },
+        )
+        .unwrap();
+    assert_eq!(right.is_valid(&after), Some(false));
     assert!(state.warnings.contains(&Warning::ActedWhileRevoked {
         event: last,
         author: e.key()

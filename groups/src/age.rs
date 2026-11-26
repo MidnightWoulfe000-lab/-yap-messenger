@@ -14,7 +14,7 @@
 //! Found while building: anyone who forwards an item can **drop the last
 //! hops**, making it look younger. Each remaining hop still verifies. This has
 //! the same effect as under-reporting, but a non-member relay can do it too.
-//! It needs a decision; see `groups/README.md`.
+//! Accepted as a known weakness (user, 26 November 2026; §6).
 
 use crate::event::Hash;
 use crate::keys::{context, Identity, MemberKey};

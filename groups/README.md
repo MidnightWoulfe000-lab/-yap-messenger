@@ -22,8 +22,8 @@ cargo test --manifest-path groups/Cargo.toml
 
 Where the specification is still open, the crate either leaves the feature out or reports a `Warning` instead of picking a rule:
 
-- `LateObjection`: an objection from the other side of a split mesh that arrives after the member was admitted. The admission currently stands.
-- `ActedWhileRevoked`: a member revoked on one side keeps acting on the other side. Their events still take effect.
+- `LateObjection` (decided): an objection from the other side of a split mesh that arrives after the member was admitted. The admission stands; `notices_for` gives the objector a notice, and `can_challenge` says whether they can start a removal vote against the new member.
+- `ActedWhileRevoked` (decided): a member revoked on one side keeps acting on the other side. What they did before the sync stands, including their messages and governance actions; once the revocation reaches a device, they are out.
 
 ## Provisional choices made while building (need confirming)
 
@@ -31,9 +31,9 @@ Where the specification is still open, the crate either leaves the feature out o
 - **Coming back after revocation** (decided: through a new proposal) keeps the earlier membership on record, keeps every old device revoked, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
 - **Owner scramble** is available whenever the device has a password set; there is no separate opt-in.
 
-## Flaw found while building
+## Known weakness (accepted)
 
-Anyone forwarding an aged item (a proposal or a scramble command) can **drop the last hops**, making it look younger. The remaining hops still verify. This has the same effect as a member under-reporting its time, but a non-member relay can do it too. The test `dropping_the_last_hops_is_not_detected` records it.
+Anyone forwarding an aged item (a proposal or a scramble command) can **drop the last hops**, making it look younger. The remaining hops still verify. This has the same effect as a member under-reporting its time, but a non-member relay can do it too. The test `dropping_the_last_hops_is_not_detected` records it. Accepted as a known weakness (user, 26 November 2026).
 
 ## Not in stage one
 

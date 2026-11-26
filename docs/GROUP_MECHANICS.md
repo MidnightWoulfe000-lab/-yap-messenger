@@ -9,6 +9,8 @@ Yap rooms are intended for people organising across an unreliable, sometimes dis
 
 These are **product decisions**, not a complete consensus, security or cryptographic protocol. Details marked **Open** must not be invented during implementation.
 
+**Design intent (user, 26 November 2026):** the group settings chosen at creation (Independent approval, rejection review, group revoking, group scramble) are meant to add up to a **toolkit against authority**: each group picks how much protection it wants. Some things are left to people's judgement on purpose; the software should not try to settle every dispute, because rules that punish too eagerly invite witch hunts.
+
 ## 2. Creating a room
 
 **Agreed direction**
@@ -35,15 +37,61 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 **Decided (user, 26 November 2026)**
 - **Objection window length:** chosen by the group's creator **at group creation**, anywhere from **1 to 60 minutes**.
 - **Sponsor's own approval:** counts toward the one-approval requirement **only while the group has 4 or fewer members**. From 5 members upwards, someone other than the sponsor must approve. This rule is a **setting chosen at group creation** (working name "Independent approval"; the user suggested something milder than "infiltration deterrent"). When it is switched off, the sponsor's approval always counts.
+- **Late objection (user, 26 November 2026):** if a valid objection was signed in time but the sponsor had not seen it when they admitted the member (for example because the group was split), **the admission stands**. When the objection and the admission meet, the person who objected gets a **notice** saying what happened, with the option of **raising a rejection**.
+  - ~~Stage one reads "raising a rejection" as starting an ordinary removal vote.~~ **Corrected (user):** "raising a rejection" is a rejection under **rejection review** (below). Once the person has already been admitted, the rejecter can **start a removal vote** (§5); their reason is shown to everyone and the normal removal thresholds apply.
+- **Rejection review (user, 26 November 2026), described but not yet specified in full:**
+  - A **setting chosen at group creation**, like Independent approval.
+  - When a sponsor proposes someone, **every member gets an approve/reject message**.
+  - A member who rejects **must give a reason**, which the other members see.
+  - The other members read it and either **accept the rejection** (the person is not admitted) or **carry on with approval through a 3-vote process**.
+  - **Override threshold:** the same as removal (§5): a majority of the other members in groups of up to 5, and 3 approvals from 6 members. Neither the rejecter nor the candidate is counted.
+  - **Override time:** a **fresh window** of the group's chosen length starts when the rejection is signed, timed by the age counter. If the override has not passed by the end, the rejection stands.
+  - **With rejection review switched off:** there is **no objection** step at all, and **the sponsor can approve** the person themselves. Instead the group has **admins**: the creator, plus members the creator deputises, with admin powers comparable to WhatsApp and similar apps. This is the conventional model, for groups that choose it.
+  - This replaces point 5 above ("any objection overrides an approval"): with review on, a rejection can be overridden; with review off, there are no objections.
+  - Not yet built in stage one, which still uses the earlier rule that any objection blocks.
+- **Admins (user, 26 November 2026)**, only in groups with rejection review switched off:
+  - **Powers:** every admin can **add members**, **remove members**, **make or unmake admins** and **change group settings**.
+  - **The creator is protected:** other admins cannot remove the creator or take away their admin role. The only way to remove the creator is a **normal removal vote** (§5), and only if the group has **group revoking** switched on. The same applies to a later SuperAdmin (below).
+  - **No admin left:** if the creator leaves or is removed and no other admin remains, **members vote a new admin in**, using the same threshold as a removal vote (§5).
+  - **Conflicts across a split mesh:** when admins on different sides make decisions that clash (for example one removes X while another makes X an admin), **the SuperAdmin's decision wins**. Between other admins, the removal wins.
+  - **What counts as a clash (proposed by Claude, accepted by user, 26 November 2026):** two decisions clash when neither admin had seen the other's and both concern the same member.
+  - **Only the SuperAdmin can remove an admin** (user, 26 November 2026). Ordinary admins cannot remove each other, so two admins removing each other cannot happen.
+- **Measuring "active in the last 30 days" (proposed by Claude, accepted by user, 26 November 2026):**
+  - **Sending a message or signing a group event** counts as activity (the user suggested messages).
+  - Each phone dates it by **when it received it**, not by the time the sender's phone put on it, because the sender's clock can be wrong or faked (for example dated 60 days ahead to look active for longer).
+  - The removal vote carries the list of members its proposer's phone saw as active, and other phones check it against their own records, so every phone counts the same people.
+  - **SuperAdmin (user, 26 November 2026):** the creator is the **SuperAdmin**. If the creator leaves or is removed, the admin the members vote in becomes the new SuperAdmin, with **the same protection** as the creator. There is one SuperAdmin at a time.
+  - **Only the SuperAdmin can change the toolkit settings** (rejection review, Independent approval, group revoking, group scramble, and the objection window). Other admins cannot touch them. Normal groups have no objections, so the objection window is a toolkit setting too.
+  - **Only the SuperAdmin can overrule another admin's decision.**
+  - **Removing the SuperAdmin (user, 26 November 2026):** always possible, **even with group revoking switched off**. Any member can propose a removal vote, and it passes if a **majority of the members active in the last 30 days** accepts it. If it passes, the members must **vote in a new SuperAdmin straight away**.
+- **Two group types (user, 26 November 2026):**
+  - **Normal group:** admins and a SuperAdmin, as above, and no objections. The sponsor or an admin admits new members.
+  - **Collective** (name proposed by Claude, needs confirming): no admins and no SuperAdmin. New members go through rejection review, and removals go through the removal vote (§5).
+  - Switching rejection review on turns a normal group into a collective, and every admin role ends.
+  - **Back to a normal group (user, 26 November 2026):** a collective has no SuperAdmin, so it turns back into a normal group by a **member vote to switch rejection review off**. A SuperAdmin is then elected as below.
+- **Electing a SuperAdmin (user, 26 November 2026):**
+  - **Anyone** in the group can stand, and the winner needs a **majority**.
+  - Until a new SuperAdmin is chosen, the group **works as a collective**.
+  - If two isolated parts of the group each elect a SuperAdmin and then reconnect, there is a **new vote with those two as the only candidates**.
+- **Rejection stands until the group decides (confirmed, user):** a rejection must give a reason. It keeps the person out unless the other members, having read the reason, vote to let them in through the override above.
+- **Open (rejection review and admins):**
+  - ~~Whether members can overrule an admin's decision other than by the removal vote.~~ Decided above: only the SuperAdmin can overrule an admin.
+
+  - How the new SuperAdmin is voted in after a removal: who can stand, the threshold, and what happens to the group until one is chosen.
+  - Whether a collective can turn back into a normal group, and who would become SuperAdmin. A collective has no SuperAdmin to change its settings, so who can change them at all.
+  - What counts as a clash between two admin decisions, so every phone resolves it the same way.
+  - How admins interact with group scramble and Independent approval.
+  - ~~Whether the rejecter, or anyone else, can reject again during the override window.~~ **Decided (user):** yes.
 - **Window timing (user, 26 November 2026):** the window is timed with the same **age counter** as scramble expiry (§6), not by any device's clock. The proposal starts at age 0 when the sponsor signs it, and each member device that holds or forwards it adds its own stopwatch time and signs the new age. An approval or objection counts only if it was signed while that member's copy was younger than the window. The same accepted flaws apply: a dishonest member forwarder can under-report the age, and time a phone spends switched off is not counted.
 
 **Open**
-- What happens to an objection that reaches the sponsor's device only after the window closed and the member was admitted (for example, sent from the other side of a split mesh). Linked to the late-objection question below.
+- ~~What happens to an objection that reaches the sponsor's device only after the window closed and the member was admitted.~~ Decided below.
 - How the 1-minute minimum interacts with members who are out of range: in a split mesh, a short window can close before some members have seen the proposal at all.
 - Whether the window length and the "Independent approval" setting can ever be changed after creation, and by what process.
 - Whether silence after one approval results in admission automatically at the window's end.
 - Whether the objector must be a current member when the objection is signed or when it arrives.
-- What happens if a late objection arrives after admission during a network partition.
+- ~~What happens if a late objection arrives after admission during a network partition.~~ Decided below.
+- With group revoking switched off, the objector's notice has no vote to offer. What, if anything, they can do then.
 - Whether an objection can be withdrawn, appealed or overruled.
 - How to prevent fake objections, spam proposals and repeated targeting.
 - Whether the proposed member receives the objection reason, or only existing members do.
@@ -84,6 +132,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 
 - In groups of 2–3 members a majority can be just 2 people. **Confirmed as intended.**
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
+  - **Updated (user, 26 November 2026): every majority vote counts only members active in the last 30 days** (measured as in §3). This applies to removal votes in groups of up to 5, overriding a rejection, removing or electing a SuperAdmin, and switching a collective back to a normal group. Members who have not been active are left out of the count. The fixed threshold of 3 approvals in groups of 6 or more is unchanged.
+  - Stage one in `groups/` still counts all current members; it has no record of messages yet, so it cannot tell who has been active.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
   - Details stage one chose (need confirming): the earlier membership stays on record; every device they had before stays revoked, so they must add devices afresh; and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
@@ -136,7 +186,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - A dishonest **member** forwarder can under-report how long it held the command, stretching its life. Each forwarder signs its own addition, so this can be traced to it afterwards but not prevented.
   - The stopwatch resets when a phone restarts. A forwarder must save the age before shutting down; time spent switched off is lost, so the command lives a little longer than 24 hours of real time.
   - None of this stops an attacker-controlled target device from refusing the command.
-  - **Found while building stage one (needs a decision):** anyone forwarding an aged item, including a non-member relay, can drop the last hops so the item looks younger. The remaining hops still verify. This applies to objection-window proposals as well as scramble commands.
+  - **Found while building stage one, accepted as a known weakness (user, 26 November 2026):** anyone forwarding an aged item, including a non-member relay, can drop the last hops so the item looks younger. The remaining hops still verify. This applies to objection-window proposals as well as scramble commands.
   - What this protects against: an honest target device with a wrong clock, and an old command being replayed against a device the owner has since got back. It does not stop an attacker-controlled device from refusing the command, which remains the best-effort limit above.
 
 **Security qualification (password)**
@@ -178,6 +228,10 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - “Latest timestamp wins” is **not yet a safe complete rule**. Offline phones can have incorrect clocks, malicious members can forge timestamps, and a late-arriving event is not necessarily a later-authorised event.
 - A robust rule must define which signed event is authoritative, how causal order is established, how concurrent valid decisions are handled, and whether revoked participants may still cast votes.
 - **Do not implement last-writer-wins solely using device wall-clock time** without a reviewed protocol.
+
+**Decided (user, 26 November 2026)**
+- **Acting while revoked elsewhere:** if a member is revoked on one side of a split and keeps acting on the other, they are **removed as soon as the revocation reaches each device**. What they did before that **stands**, and **their messages are not deleted**.
+  - **This includes governance actions** (confirmed, user): an approval, vote or proposal they made before the sync still counts. The risk is accepted: a member revoked on one side can still help admit someone on the other until the sides reconnect. Cancelling those actions afterwards is the road to witch hunts; people have to use their judgement here rather than rely on the software.
 
 **Open**
 - Whether conflicting votes can be merged, must be replayed or require a fresh vote.
