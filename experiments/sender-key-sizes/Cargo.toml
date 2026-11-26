@@ -1,0 +1,13 @@
+[package]
+name = "yap-sender-key-sizes"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
+description = "Measures libsignal message sizes for the group encryption proposal; not linked into the Yap app"
+
+[dependencies]
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal.git", rev = "257105c55a7389ca6b1e85185e2769465e6729f1" }
+rand = "=0.9.4"
+futures = "=0.3.31"
+uuid = "1"

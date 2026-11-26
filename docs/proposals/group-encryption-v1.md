@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: blocked by review findings; do not implement.** A Codex design review on 26 November 2026 found problems that must be fixed first: see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md).
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -70,8 +70,10 @@ All eleven choices are decided (26 November 2026). Choice 11 came out of the rev
 5. **Besides kicks, when do keys change?**
    Decided (proposed by Claude, accepted by user, 26 November 2026): **on every removal, whenever a member marks one of their devices
    as lost, and once a week for each member's own sending key.** The weekly change
-   limits how long someone who secretly copied a phone's keys can keep reading.
-   Each change means that member hands a new key to everyone else, so more
+   is routine practice. *Corrected after the Codex review (finding 11):* it does
+   not, on its own, limit how long someone who copied a phone can keep reading,
+   because the new key travels over one-to-one sessions the copier may also be
+   able to read (see 3.6). Each change means that member hands a new key to everyone else, so more
    frequent changes cost more mesh traffic.
 
 6. **Accept the cost of a kick in a large group?**
@@ -160,9 +162,17 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   pre-key pair (`mark_kyber_pre_key_used`), and the measurement in 3.9 confirmed
   the refusal. Yap's store must keep that record permanently, not just in
   memory.
-- A member replaces their bundle monthly with a new event. This keeps the
-  record of used base keys bounded. The old pre-keys are kept for 24 hours after
-  replacement, for set-up messages still in the mesh, and then deleted.
+- A member replaces their bundle monthly with a new event. Pre-key IDs are
+  never reused. The old pre-keys are kept for 24 hours after replacement, for
+  set-up messages still in the mesh, and then deleted together with their
+  record of used base keys: a set-up message for a deleted pre-key fails anyway.
+  This keeps the record bounded. Storing it durably is Yap's job; libsignal only
+  calls the store.
+- **Set-up limits** (Codex finding 13). A set-up message carries the sender's
+  identity key in the clear, so a phone first checks, cheaply, that the sender
+  is an active member, and refuses anyone else. It then accepts at most 4 new
+  sessions from one member per day before doing the expensive post-quantum
+  work. A member who needs more (after a restore, say) waits a day.
 - When two members both open a session at once, the one with the smaller
   identity key (comparing bytes) is the initiator, as in contact pairing, and
   the other session is dropped.
@@ -218,6 +228,18 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   [rotating address labels](rotating-address-labels.md) proposal. A receiver
   works out the current label for each member: at most 127 cheap calculations
   an hour.
+- **Outer layer** (Codex finding 5). Libsignal leaves some fields readable:
+  a group message shows its distribution ID, chain ID and step number, a
+  one-to-one message its ratchet key, and a session set-up message the sender's
+  identity key. Any relay could follow those across label changes. So the whole
+  libsignal message is encrypted once more before it goes in the envelope, with
+  a standard authenticated cipher (ChaCha20-Poly1305 or AES-256-GCM, from a
+  maintained library) under a key derived with HKDF-SHA256 from the label key
+  and the hour. The label and the envelope header are bound in as associated
+  data. A relay then sees only the label and ciphertext. One-to-one pieces use
+  the label key the pair share (3.9) in the same way. This layer is new and
+  **needs its own review before it is relied on**; until then, the privacy
+  claims in section 4 hold only without it.
 
 ### 3.5 Governance events travel encrypted
 
@@ -228,20 +250,53 @@ unchanged, so the rules in `groups/` work as built.
 
 ### 3.6 Removal and key changes
 
-A change of keys is triggered by:
-- any removal: by vote, by an admin, or of the SuperAdmin;
-- a member marking one of their own devices as lost (`RevokeOwnDevice`);
-- the weekly change of a member's own sending key (choice 5).
+Each of a member's sending keys has a **generation number**, counting up from 1.
+A change of keys is either:
+- **justified by the group log:** any removal (by vote, by an admin, or of the
+  SuperAdmin) or a member marking one of their own devices as lost
+  (`RevokeOwnDevice`). The hand-over names the governance events it answers, so
+  receivers can check the reason; or
+- **routine:** the weekly change (choice 5), or a resynchronisation (below).
 
 When a phone processes a removal, it makes a new sending key under a new random
 distribution ID and hands it over, with a new label key, to every member active
 in its state. It never sends it to the removed member. From then on it sends
-only with the new key.
+only with the new key. Several removals processed together produce **one**
+change, not one each.
 
-Old sending keys, its own and others', are kept only for the envelope lifetime
-(24 hours is proposed for one-to-one), so slow messages can still be read, and
-are then deleted. Deleting them keeps forward secrecy: a phone seized later does
-not hold keys for old messages.
+**Limits** (Codex finding 10). Justified changes are never refused, because
+refusing one could keep a removed member in. They are merged and scheduled
+instead. Routine changes are limited to 2 per member per day; more are
+ignored and the app warns.
+
+**Keeping old keys.** Old sending keys, its own and others', are kept for 24
+hours, so slow messages can still be read, with at most 8 generations per
+member. If a member goes past 8 within a day, the oldest is deleted early and
+messages still in flight under it are lost. That loss is accepted and shown.
+
+**Erasure** (Codex finding 12). Deleting a generation deletes its chain key, the
+skipped message keys libsignal kept for out-of-order messages, and any copy of
+its distribution message. A distribution message is not kept after it has been
+processed. The encrypted store's snapshots and journals are rewritten so the old
+keys do not survive in them. Flash storage cannot promise physical erasure, so
+the claim is limited to what section 4 says.
+
+**A receiver that falls too far behind** (Codex finding 8). Resending the same
+distribution message does not help: at the pinned revision, processing one for
+a chain the receiver already has keeps the receiver's old position. A receiver
+that cannot decrypt because it is more than 2,000 steps behind, or has no key
+for that generation, asks the sender over their one-to-one session. The sender
+answers with a **fresh generation** for everyone, at most once an hour however
+many ask; it counts as routine. Messages in the gap stay lost for that
+receiver. This needs a test against the pinned library before it is relied on.
+
+**Copied phones** (Codex finding 11). A new sending key does not shut out
+someone who copied a member's phone, if they can still read that member's
+one-to-one sessions. Those sessions recover on their own once each side has
+sent a message with a fresh ratchet key that the copier did not see; a copier
+who only listens cannot follow that step, but one who can act in the session
+can. A member who knows their phone was copied should be removed and rejoin
+with a new identity, or re-pair.
 
 A removed member's phone deletes the group's keys. With group scramble on, it also
 wipes the group (§6). Like scramble, this is best effort on a phone that may be
@@ -255,6 +310,15 @@ modified.
   avoids a storm of changes after a long split.
 - A newcomer admitted on the other side gets the current sending keys of every
   member who learns of them, with no key change.
+- **Resynchronising** (Codex finding 9). A member who missed a hand-over also
+  misses the new label key, so it cannot recognise the messages that would tell
+  it something is missing. So each pair of members also keeps a check that does
+  not use group labels. When two members' phones first hear from each other
+  after a gap, they send each other, over their one-to-one session, the current
+  generation number of their sending key. A phone that is behind asks for the
+  missing hand-over. A pending hand-over is kept until it is acknowledged or the
+  recipient stops being a member; when a newer generation exists, only the
+  newest is resent.
 - **Accepted limit:** while a removal has not yet reached one side, members there
   still hand keys to, and send to, the removed person. They can read that side's
   messages until the removal arrives. This is the same gap as the decided rule
@@ -270,35 +334,58 @@ scramble removed them.
 
 ### 3.9 Cost, and the alternative considered
 
-**Measured sizes** (pinned libsignal, one desktop run on 26 November 2026, no
-mesh; a throwaway program, not kept in the repository):
+**Measured sizes** with the pinned libsignal, using the program in
+[`experiments/sender-key-sizes/`](../../experiments/sender-key-sizes/README.md)
+(one desktop run on 26 November 2026, no mesh). Each figure is the largest seen
+in that case, which is evidence, not a proven maximum.
 
 | Item | Bytes |
 | --- | --- |
 | Pre-key bundle | about 1,775 |
 | Sender-key distribution message | 96 |
-| First hand-over to someone, which also sets up the session | 1,886 |
-| Later hand-over on an open session (largest of 20) | 234 |
+| Hand-over on a new session, before any reply (largest of 10) | 1,918 |
+| Hand-over on an open session, alternating (largest of 200) | 266 |
+| Hand-over on an open session, one way only (largest of 200) | 269 |
 | Group message carrying 100 bytes of text | 205 |
 | Group message carrying 1,024 bytes of text | 1,134 |
 
-**Batching is required.** A removal in a full group of 128 means 127 × 126 =
-16,002 hand-overs, about 3.7 MB. Sent one per envelope, that is 16,002
-envelopes, while the proposed relay limits are 1,024 pending envelopes and 8 MiB
-per phone. The mesh would drop most of them. Instead, each member sends **one
-envelope per key change** holding a piece for every other member: about 126 ×
-234 bytes, roughly 30 KB, under the 64 KiB envelope limit. Each piece is
-encrypted to its recipient over their session and marked with a label from a
-key the pair share, so a recipient finds its piece without trying the others.
+**Batching by size** (Codex finding 6). A removal in a full group of 128 means
+127 × 126 = 16,002 hand-overs. One per envelope would be 16,002 envelopes,
+against the proposed relay limits of 1,024 pending envelopes and 8 MiB per
+phone. So each member packs its pieces into as few envelopes as their actual
+sizes allow:
+- at most 56 KiB of pieces per envelope, leaving room in the 64 KiB limit for
+  the header and outer layer;
+- at most 128 pieces per envelope, each under 4 KiB;
+- each piece is encrypted to its recipient over their session and marked with
+  a label from a key the pair share, so a recipient finds its piece without
+  trying the others.
 
-| Event, group of *n* | Envelopes | Total size |
+| Event, group of 128 | Envelopes | Total size |
 | --- | --- | --- |
-| A removal, *n* = 128 | 127, one per remaining member | about 3.8 MB |
-| A newcomer joins, *n* = 128 | about 127 to the newcomer, and a few batches back | about 480 KB |
-| One member's weekly key change | 1 | about 30 KB |
+| A removal, every session open | 127, one per remaining member | about 4.6 MB |
+| A removal, no sessions open yet (worst case) | about 635, five per member | about 31 MB |
+| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 490 KB |
+| One member's weekly key change | 1 | about 36 KB |
 
-These are bytes created, before the mesh copies them hop to hop. Real cost
-depends on the mesh design and must be measured on phones.
+The worst case is far over one phone's relay limits, so the mesh will drop some
+of it and resynchronising (3.7) repairs the rest more slowly. Sessions are
+normally opened when a member joins, which keeps removals near the first row.
+
+**Carrying a batch** (Codex finding 7). A batch has many recipients, so the
+one-recipient custody rules do not fit. Proposed:
+- relays treat a batch as one envelope with one digest, and never take pieces
+  out, so deduplication still works;
+- a relay keeps it until it expires or its limits force it out, not until one
+  recipient has it;
+- each recipient acknowledges its own piece to the sender over their session;
+  the sender resends only unacknowledged pieces, in a new, smaller batch;
+- each piece states inside its own encryption the group, the recipient and the
+  generation, so it is checked on its own and does not depend on the batch.
+
+How relays rank batches against other traffic, and what relay storage this
+really uses as copies spread, belongs to the mesh design and must be measured.
+**Open until then.**
 
 **MLS** (the IETF Messaging Layer Security standard) makes a removal cost far
 less in large groups. It is not proposed for version 1 because it needs every
@@ -342,7 +429,8 @@ people nearby? Accepting is the person's own explicit consent, as §9 requires.
 phones sign its first event, as the two founders of any group do. Each later
 acceptance admits that person without a vote, because the offer only goes to
 active members of the original group. Every phone checks that against its own
-state of the original group.
+current state of the original group (Codex finding 14): a removal the phone
+already knows about always blocks the person, whatever an offer says.
 
 **Someone arriving later.** Decided (user, 26 November 2026): when another
 member of the original group comes into reach of a temporary group that has
@@ -379,27 +467,43 @@ cut-off part knows, so they receive the offer like anyone else. A QR scan would
 not reveal that either. The app must say that it cannot know who was removed
 elsewhere, and never call the temporary group safe.
 
-**Review of the mechanics (see section 5):**
-- **Who is in reach.** A phone counts a member as in reach when it has received
-  something from them over the local mesh in the last 15 minutes. While a phone
-  counts as cut off, it sends a small encrypted "still here" group message
-  every 15 minutes, so quiet members are counted too. To strangers these are
-  ordinary labelled envelopes, and the labels change every hour. Nothing new is
-  broadcast, and the group's ID never goes over the air.
-- **Two phones both doing the paperwork.** When phones disagree about who is in
-  reach, two of them may each send an offer. A phone that receives two offers
-  for the same original group keeps the one from the smaller member key and
-  declines the other. If both have already started, it is the case of two
-  temporary groups meeting, and the merge offer applies.
+**Review of the mechanics (see section 5, and the Codex findings named):**
+- **Who is in reach** (finding 15). Having a message from someone proves who
+  wrote it, not where they are or when: a relay can deliver an old message
+  late, or carry fresh ones between distant meshes. So a phone checks reach
+  directly: it sends a fresh random challenge, encrypted to the group, over the
+  local mesh only, and counts a member as in reach if their answer, which must
+  include that challenge, comes back within 30 seconds. This shows the member
+  answered just now through the local mesh. It does not prove physical
+  closeness, and a relay that tunnels traffic between meshes can still make two
+  places look like one. Strangers see only ordinary labelled envelopes; the
+  group's ID never goes over the air.
+- **Hearing from members** (finding 15). For "not heard from in 24 hours" to
+  mean something in a quiet group, every member's phone sends a small encrypted
+  heartbeat once a day. Being cut off is still a judgement, never certain, and
+  the app says so.
+- **Two phones both doing the paperwork** (finding 16). The phone with the
+  smallest member key does the paperwork, but only for 2 minutes: if no offer
+  has come from it by then, the next smallest takes over. Once anyone has
+  accepted an offer, that formation is never replaced because a smaller key
+  turns up. Two formations that have both started are two temporary groups
+  meeting, and the merge offer applies.
+- **Binding consent** (finding 16). An acceptance names the exact temporary
+  group ID, the original group, the member's current membership in it (the
+  event that admitted them, which changes if they left and rejoined), the
+  settings and the offer it answers. It cannot be reused for another formation
+  or merge.
 - **New events.** The temporary group's first event records the original
   group's ID and the log heads of the phone that made the offer (seen only by
   members, since it is encrypted). `AcceptOffer`, signed by the person
-  accepting, is valid if they are an active member of the original group at
-  those heads, which every phone checks against its own copy. `InviteNearby`,
-  from any member, offers the group to a late arrival, who then sends
-  `AcceptOffer`.
+  accepting, is valid only if they are active in the original group both at
+  those heads and in the checking phone's own current state (finding 14).
+  `InviteNearby`, from any member, offers the group to a late arrival, who then
+  sends `AcceptOffer`.
 
 ## 4. What this protects, and what it does not
+
+Narrowed after the Codex review (findings 5, 11 and 12).
 
 **Protects:**
 - message and governance content from non-member phones carrying it, and from
@@ -407,14 +511,20 @@ elsewhere, and never call the temporary group safe.
 - messages sent after a removal (once the removal has reached the sender's phone)
   from the removed member;
 - messages sent before a newcomer joined, from that newcomer;
-- old messages on a phone seized later, once old keys have been deleted.
+- old **ciphertext**, on a phone seized later, whose keys have really been
+  erased (3.6). It does not protect chat history kept on the phone.
 
 **Does not protect:**
 - anything a member already read or copied, including a kicked member's copies;
+- chat history stored on a phone that is seized unlocked;
 - the window during a split before a removal reaches the other side (3.7);
-- against a member's phone that is hacked while in use, until the next key change;
-- metadata: relays still see envelope sizes, timing, which phones pass them on,
-  and that a label recurs within its hour;
+- against someone who copied a member's phone, until that member's one-to-one
+  sessions recover or they re-pair (3.6). The weekly key change alone does not
+  end it;
+- metadata. Relays see envelope sizes, timing and which phones pass envelopes
+  on, and that a label recurs within its hour. Until the outer layer (3.4) is
+  reviewed and built, they can also read libsignal's own headers and follow a
+  sending key across label changes for as long as it lasts;
 - any of this on a phone running a modified app.
 
 ## 5. Review of the open points
@@ -428,13 +538,13 @@ it: **not an independent review**.
    store that record permanently and replace bundles monthly (3.2).
 2. **Checkpoints and concurrent branches.** *Replaced after the Codex review:*
    newcomers receive the full governance log instead (3.3, step 5).
-3. **Knowing a hand-over arrived.** *Proposed:* the recipient sends a small
-   encrypted acknowledgement over their session, as one-to-one receipts work.
-   The sender resends unacknowledged pieces, batched, on the mesh's retry
-   schedule. It stops when the recipient is no longer an active member, or once
-   the envelope lifetime has passed, leaving it to the next key change. A member
-   who receives a group message under a sending key it does not have asks the
-   sender for a resend, at most once per sender per hour.
+3. **Knowing a hand-over arrived.** *Proposed, revised after Codex findings 8
+   and 9:* the recipient acknowledges each piece over their session, naming the
+   generation. The sender resends unacknowledged pieces, batched, until they are
+   acknowledged or the recipient stops being a member, resending only the
+   newest generation. Members compare generations over their one-to-one
+   sessions when they reconnect (3.7). A receiver too far behind gets a fresh
+   generation rather than a resend (3.6).
 4. **Encodings.** *Proposed layouts.* Every field has a fixed size or a length
    limit, and each kind starts with its own tag. A hash covers a tag naming its
    purpose as well as the bytes.
@@ -453,9 +563,11 @@ it: **not an independent review**.
    excluded from backups.
 6. **Limits against a hostile member.** *Proposed:*
    - at most 127 sessions per group, following the member cap;
-   - at most 4 sending keys kept per member (current and recent);
-   - at most 4 hand-overs accepted from one member per hour, and above that
-     they are ignored and the app warns;
+   - at most 8 sending-key generations kept per member, for 24 hours (3.6);
+   - changes justified by the group log are never refused; routine changes are
+     limited to 2 per member per day (3.6, Codex finding 10);
+   - at most 4 new sessions accepted from one member per day, after a cheap
+     membership check (3.2, Codex finding 13);
    - libsignal lets a message skip up to 25,000 chain steps
      (`MAX_FORWARD_JUMPS`), so a hostile member can make every phone do that
      work per message. Yap should drop a message more than 2,000 steps ahead of
@@ -485,11 +597,26 @@ planned future feature; version 1 is one device per member.
   (choice 2).
 - A replayed first hand-over is refused after a restart (the base-key record
   survives).
-- A removal in a group of 128 produces 127 envelopes, each under the envelope
-  limit, and fits the relay limits.
+- A removal in a group of 128 with open sessions produces envelopes that are
+  each under the envelope limit; the total is measured against the relay limits.
 - A newcomer who receives the full governance log reaches the same state as
   existing members, including after splits.
 - A message skipping more than 2,000 chain steps is dropped before decryption.
+- After the Codex review:
+  - the outer layer hides every libsignal header from a relay (once reviewed);
+  - five removals in an hour all take effect, merged into one change each;
+  - a receiver held more than 2,000 steps behind recovers through a fresh
+    generation, against the pinned library;
+  - a member who missed a hand-over, and its label key, catches up through the
+    one-to-one check on reconnecting;
+  - batches stay under the size limits for new, unacknowledged, open and
+    ratcheting sessions, and a relay never splits one;
+  - erased generations leave no keys in snapshots or journals;
+  - a phone that knows of a removal refuses that person's `AcceptOffer`, even
+    with old heads;
+  - an old message delivered late does not make its author count as in reach;
+  - a paperwork phone that stays silent is replaced after 2 minutes, and an
+    accepted formation is never displaced.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.

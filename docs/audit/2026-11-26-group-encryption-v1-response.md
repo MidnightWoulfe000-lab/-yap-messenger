@@ -5,8 +5,10 @@
 **Status:** Every finding is accepted. The project owner took the recommended
 option for both decisions (A and B below) on 26 November 2026. Finding 4 is
 fixed in `groups/`. Findings 1 to 3 are resolved in the proposal by decision A.
-The rest still need proposal changes, and the proposal must not be implemented
-until they are made and reviewed.
+Findings 5 to 16 are answered by changes to the proposal (same day). Those
+changes are Claude's own and **need a second review**; the proposal must not be
+implemented until then. Finding 7 is only partly settled: part of it belongs to
+the mesh design.
 
 Finding numbers are Codex's.
 
@@ -32,18 +34,18 @@ Finding numbers are Codex's.
 | 2 | Accepted, resolved by decision A | No checkpoints: the newcomer receives and checks the events behind every branch. |
 | 3 | Accepted, resolved by decision A | The newcomer has the whole log, ancestry included, and runs the same rules as everyone else. |
 | 4 | Accepted, confirmed, fixed | Decision B: a vote always counts at least half of all current members, leaving out the person it is about. Built in `groups/` (`counted`), with a test that one member listing only themselves cannot remove the SuperAdmin. |
-| 5 | Accepted, confirmed | Hourly labels alone do not stop tracking: libsignal's own headers are readable. Proposed fix: one more layer of encryption around every group envelope, using a key from the label key, so a relay sees only the label and ciphertext. This is a new construction and needs its own review. Until then, the privacy claims are weakened in writing. |
-| 6 | Accepted | Batches are split by actual size into as many envelopes as needed, with limits on pieces per envelope. The "127 envelopes" claim is withdrawn. The measurement program is kept in `experiments/` and extended to new, unacknowledged and ratcheting sessions. |
-| 7 | Accepted | Carrying a batch addressed to many people needs its own rules in the mesh design: each piece acknowledged separately, plus custody, expiry and resending. Left open until the mesh design takes it up. |
-| 8 | Accepted, confirmed | Recovery from a gap that is too large: the receiver asks the sender over their one-to-one session, and the sender changes to a fresh sending key. That change counts as justified (see 10). Tested against the pinned library before relying on it. |
-| 9 | Accepted | Each pair of members keeps a resynchronisation step that does not depend on group labels. On reconnecting they compare the generation numbers of their current keys over their one-to-one session and request anything missing. |
-| 10 | Accepted | Key changes caused by a governance event are never capped; they are merged and scheduled instead. Only unexplained changes are limited. Which delayed messages are lost when storage limits are hit is written down. |
-| 11 | Accepted | The weekly change stays as routine practice, but the claim that it limits how long a copied phone can read is removed. Recovering from a copied phone needs the one-to-one sessions to recover first, or re-pairing; the proposal will state when each happens. |
-| 12 | Accepted | The forward-secrecy claim is narrowed to old ciphertext whose keys have really been erased. Erasure of skipped message keys, saved distribution messages, snapshots and journals is specified. Chat history kept on an unlocked phone is not protected by key deletion. |
-| 13 | Accepted | Records for retired pre-key IDs, which are never reused, are pruned. Session set-ups are rate-limited per member before the expensive work. The base-key record is Yap's job to store durably. |
-| 14 | Accepted | A removal a phone already knows about always blocks eligibility, whatever heads an offer names. |
-| 15 | Accepted | Being heard from proves who wrote a message, not where they are or that it is new. "In reach" becomes answering a fresh challenge within a short time. Members also send a small encrypted heartbeat every day, so "not heard from" means something even when the group is quiet. The proposal will say that isolation is always uncertain. |
-| 16 | Accepted | The paperwork phone gets a timeout and a fallback. A formation that people have accepted is never replaced because a smaller key appears. Each acceptance is bound to the exact temporary group, original group, settings and offer. |
+| 5 | Accepted, confirmed; proposal revised | §3.4 adds an outer layer: the whole libsignal message is encrypted again under a key derived from the label key, so a relay sees only the label and ciphertext. It is a new construction and needs its own review. §4 now says relays can read libsignal's headers until it is built. |
+| 6 | Accepted; proposal revised | §3.9: batches are split by size (at most 56 KiB and 128 pieces per envelope), with the worst case shown (about 635 envelopes, 31 MB, when no sessions are open). The "127 envelopes" claim is withdrawn. The measurement program is kept in `experiments/sender-key-sizes/` and now covers new, unacknowledged, alternating and one-way sessions. |
+| 7 | Accepted; partly settled | §3.9: relays treat a batch as one envelope and never take pieces out; it is kept until expiry or limits, not until one recipient has it; each piece is acknowledged to the sender and checked on its own. How relays rank batches and the real storage used belong to the mesh design and stay open. |
+| 8 | Accepted, confirmed; proposal revised | §3.6: a receiver too far behind asks the sender over their session, and the sender answers with a fresh generation for everyone, at most once an hour. Needs a test against the pinned library. |
+| 9 | Accepted; proposal revised | §3.7: pairs compare sending-key generation numbers over their one-to-one session when they reconnect, without group labels. Pending hand-overs are kept until acknowledged or the recipient leaves, not dropped after 24 hours. |
+| 10 | Accepted; proposal revised | §3.6: changes justified by the group log are never refused and name the events they answer; several are merged into one. Only routine changes are limited (2 per member per day). Up to 8 generations are kept for 24 hours, and losing messages past that is accepted and shown. |
+| 11 | Accepted; proposal revised | Choice 5 (weekly change) stays as decided, but its stated reason is corrected. §3.6 and §4 now say a copier is only shut out once the one-to-one sessions recover or the member re-pairs. |
+| 12 | Accepted; proposal revised | §3.6 specifies erasure of chain keys, skipped message keys, distribution messages, snapshots and journals. §4 narrows the claim to erased ciphertext keys and says stored chat history is not protected. |
+| 13 | Accepted; proposal revised | §3.2: pre-key IDs are never reused, and the base-key record for a deleted pre-key is deleted with it. A cheap membership check, then at most 4 new sessions per member per day, before the expensive work. |
+| 14 | Accepted; proposal revised | §3.10: a removal the checking phone knows about always blocks an acceptance, whatever heads the offer names. |
+| 15 | Accepted; proposal revised | §3.10: reach is checked with a fresh challenge answered within 30 seconds over the local mesh, which shows a recent answer, not physical closeness; tunnelling is named as a limit. Members send a daily heartbeat so "not heard from" means something. Isolation is shown as uncertain. |
+| 16 | Accepted; proposal revised | §3.10: the paperwork phone has 2 minutes before the next one takes over; an accepted formation is never replaced by a smaller key; each acceptance is bound to the exact temporary group, original group, membership, settings and offer. |
 
 ## Decisions (project owner, 26 November 2026: recommended option for both)
 
