@@ -2,7 +2,9 @@
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
-choices in section 2; section 3 still needs review before any code is written.
+choices in section 2. Section 5 records a review of the open
+points by Claude, which also wrote this proposal: it is **not an independent
+review**, and the design still needs one before release.
 
 **Audience:** the project owner, who decides the choices in section 2, and
 reviewers and coding agents, who check the design in section 3.
@@ -37,7 +39,7 @@ read them.
 
 ## 2. Choices for the project owner
 
-All ten choices are now decided (26 November 2026). The design in section 3 follows them.
+All eleven choices are decided (26 November 2026). Choice 11 came out of the review in section 5.
 
 1. **Can new members read messages from before they joined?**
    Decided (proposed by Claude, accepted by user, 26 November 2026): **no**. Sender keys make this the natural result: a newcomer
@@ -102,6 +104,15 @@ All ten choices are now decided (26 November 2026). The design in section 3 foll
     group offered to the members of both, each person accepts or not, and each
     old temporary group's messages stay in its own chat.
 
+11. **Can a newcomer see who has voted in a vote that is still open?**
+    To work out the result of a vote that started before they joined, a
+    newcomer's phone needs to know who has already voted in it (3.3). They
+    cannot vote in it themselves, because its list of voters was fixed when it
+    started. **Decided (proposed by Claude, accepted by user, 26 November
+    2026): yes.** An open vote is the group's current business,
+    not its history, and the newcomer is a member now. The alternative hides the
+    voters behind hashes, which makes the checkpoint harder to check.
+
 ## 3. Design for review
 
 ### 3.1 Building blocks
@@ -134,16 +145,21 @@ Extra devices each need their own sending key and sessions; that is later work.
 Members of a group are not necessarily contacts, so they need a way to open a
 one-to-one session with each other without meeting. Each member publishes a
 **signed pre-key bundle** in the group log: a signed pre-key and a signed
-post-quantum (Kyber) last-resort pre-key. A Kyber-1024 public key is 1,568 bytes,
-so a bundle fits within the 8,192-byte event limit.
+post-quantum (Kyber) last-resort pre-key. Measured with the pinned library, a
+bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
 
 - The joiner's bundle travels in their `JoinRequest`. A new event lets a member
   replace their bundle, for example on a schedule.
 - There are no one-time pre-keys, because a shared log cannot hand each one out
-  to exactly one person. Libsignal accepts a bundle without them; the cost is
-  weaker replay protection on the first message of a session. **Reviewer to
-  confirm this is acceptable**, or to propose a way of giving each member a
-  one-time pre-key per pair.
+  to exactly one person. Libsignal accepts a bundle without them (the one-time
+  pre-key is optional in `PreKeyBundle::new`). A replayed first message is still
+  refused: libsignal's store records each base key used with a last-resort
+  pre-key pair (`mark_kyber_pre_key_used`), and the measurement in 3.9 confirmed
+  the refusal. Yap's store must keep that record permanently, not just in
+  memory.
+- A member replaces their bundle monthly with a new event. This keeps the
+  record of used base keys bounded. The old pre-keys are kept for 24 hours after
+  replacement, for set-up messages still in the mesh, and then deleted.
 - When two members both open a session at once, the one with the smaller
   identity key (comparing bytes) is the initiator, as in contact pairing, and
   the other session is dropped.
@@ -162,24 +178,37 @@ so a bundle fits within the 8,192-byte event limit.
    clear.
 4. **Admission** follows the built rules (`Admit`, or `AdminAdd` in a normal
    group).
-5. **Starting state for the newcomer.** The newcomer must know the current
-   members, admins, settings and bundles to check later events, but the spec
-   says they must not see the join history from before they arrived (§4). This
-   proposal adds a **state checkpoint**:
-   - The admitting event carries the hash of a canonical encoding of the group
-     state as of that event's parents (members, admins, SuperAdmin, settings,
-     bundles; no sponsors, approvals or reasons for earlier joins).
-   - Every member checks that hash against the state they derive themselves. A
-     sponsor who puts a false checkpoint in the event makes the admission
-     invalid for everyone, so the newcomer is never let in on a lie.
-   - The sponsor sends the checkpoint itself to the newcomer over their session.
-     The newcomer checks it against the hash and starts from it.
-
-   **Open for review:** events made on another branch of a split at the same time
-   as the admission cite parents that the newcomer never received, so the
-   newcomer cannot check them against their own state at that point. One
-   possible fix is for the sponsor to also send checkpoints for those branches;
-   this needs working out and testing before it is built.
+5. **Starting state for the newcomer.** The newcomer must know the group's
+   current state to check later events, but the spec says they must not see the
+   join history from before they arrived (§4). The design:
+   - **Every governance event carries a state hash:** the SHA-256 of the
+     canonical *checkpoint* (below) of the group state in that event's own view.
+     Every member checks it like any other rule; an event with a wrong state
+     hash is invalid.
+   - **The checkpoint** holds what the rules need and no more: current members
+     with their devices and bundles, admins, the SuperAdmin, settings, and open
+     business (pending join proposals, open votes and elections with who has
+     voted, choice 11). Members who were removed appear only as the hash of
+     their member key, with their device lists, so the rules for coming back
+     still work. A newcomer can tell that someone they already know was removed
+     before, but cannot list who was. Left out: who sponsored earlier members,
+     earlier memberships, closed votes, reasons, and failed join attempts.
+   - **On admission** the sponsor sends the newcomer, over their session, the
+     checkpoint matching the admitting event's state hash. The newcomer checks
+     it and starts from it. A sponsor who lies makes the admission invalid for
+     every other member, so no one hands the newcomer any keys and the
+     newcomer's phone can see that it never got in.
+   - **Events the newcomer cannot check.** An event from a branch of a split
+     that ran alongside the admission cites parents the newcomer never had. The
+     newcomer's phone holds such events and does not act on them. When a later
+     event joins both branches, the newcomer asks a member for the checkpoint
+     at that event, checks it against that event's state hash, and continues
+     from it.
+   - **Confirmation.** A state hash is signed only by the event's author. The
+     newcomer treats a checkpoint as provisional until an event from a second
+     member, made after it, has a state hash that matches the newcomer's own
+     working. If one ever fails to match, the app warns the newcomer and asks
+     another member for the checkpoint.
 6. **Keys.** When a member's phone processes the admission, it opens a session
    with the newcomer from the newcomer's bundle and hands over its current
    sending key. The newcomer does the same towards every member. Received keys
@@ -256,14 +285,35 @@ scramble removed them.
 
 ### 3.9 Cost, and the alternative considered
 
-| Event | Private hand-overs |
-| --- | --- |
-| A member joins a group of *n* | about 2*n* (each member to the newcomer, and back) |
-| A removal in a group of *n* | about (*n*−1)×(*n*−2): about 16,000 at 128 |
-| A member's weekly key change | *n*−1 |
+**Measured sizes** (pinned libsignal, one desktop run on 26 November 2026, no
+mesh; a throwaway program, not kept in the repository):
 
-The hand-over message sizes, including the one-to-one session overhead, must be
-measured with the pinned library; this proposal does not guess them.
+| Item | Bytes |
+| --- | --- |
+| Pre-key bundle | about 1,775 |
+| Sender-key distribution message | 96 |
+| First hand-over to someone, which also sets up the session | 1,886 |
+| Later hand-over on an open session (largest of 20) | 234 |
+| Group message carrying 100 bytes of text | 205 |
+| Group message carrying 1,024 bytes of text | 1,134 |
+
+**Batching is required.** A removal in a full group of 128 means 127 × 126 =
+16,002 hand-overs, about 3.7 MB. Sent one per envelope, that is 16,002
+envelopes, while the proposed relay limits are 1,024 pending envelopes and 8 MiB
+per phone. The mesh would drop most of them. Instead, each member sends **one
+envelope per key change** holding a piece for every other member: about 126 ×
+234 bytes, roughly 30 KB, under the 64 KiB envelope limit. Each piece is
+encrypted to its recipient over their session and marked with a label from a
+key the pair share, so a recipient finds its piece without trying the others.
+
+| Event, group of *n* | Envelopes | Total size |
+| --- | --- | --- |
+| A removal, *n* = 128 | 127, one per remaining member | about 3.8 MB |
+| A newcomer joins, *n* = 128 | about 127 to the newcomer, and a few batches back | about 480 KB |
+| One member's weekly key change | 1 | about 30 KB |
+
+These are bytes created, before the mesh copies them hop to hop. Real cost
+depends on the mesh design and must be measured on phones.
 
 **MLS** (the IETF Messaging Layer Security standard) makes a removal cost far
 less in large groups. It is not proposed for version 1 because it needs every
@@ -344,14 +394,25 @@ cut-off part knows, so they receive the offer like anyone else. A QR scan would
 not reveal that either. The app must say that it cannot know who was removed
 elsewhere, and never call the temporary group safe.
 
-**Open for review:**
-- How phones notice that fellow members are nearby without revealing group
-  membership to strangers. This belongs with the local mesh design and must use
-  rotating identifiers, never a fixed group ID broadcast over the air.
-- The new governance event for "admitted by accepting an offer", and how a phone
-  checks it against the original group's state.
-- What happens when phones in one part disagree about who is in reach, so two
-  of them each think they should do the paperwork.
+**Review of the mechanics (see section 5):**
+- **Who is in reach.** A phone counts a member as in reach when it has received
+  something from them over the local mesh in the last 15 minutes. While a phone
+  counts as cut off, it sends a small encrypted "still here" group message
+  every 15 minutes, so quiet members are counted too. To strangers these are
+  ordinary labelled envelopes, and the labels change every hour. Nothing new is
+  broadcast, and the group's ID never goes over the air.
+- **Two phones both doing the paperwork.** When phones disagree about who is in
+  reach, two of them may each send an offer. A phone that receives two offers
+  for the same original group keeps the one from the smaller member key and
+  declines the other. If both have already started, it is the case of two
+  temporary groups meeting, and the merge offer applies.
+- **New events.** The temporary group's first event records the original
+  group's ID and the log heads of the phone that made the offer (seen only by
+  members, since it is encrypted). `AcceptOffer`, signed by the person
+  accepting, is valid if they are an active member of the original group at
+  those heads, which every phone checks against its own copy. `InviteNearby`,
+  from any member, offers the group to a late arrival, who then sends
+  `AcceptOffer`.
 
 ## 4. What this protects, and what it does not
 
@@ -371,18 +432,63 @@ elsewhere, and never call the temporary group safe.
   and that a label recurs within its hour;
 - any of this on a phone running a modified app.
 
-## 5. Open for review
+## 5. Review of the open points
 
-1. Pre-key bundles with no one-time pre-keys (3.2).
-2. Checkpoints for events from concurrent branches (3.3, step 5).
-3. How a sender learns that a hand-over was received, and when to resend it.
-4. The canonical encodings: checkpoint, message header, the hand-over message
-   that wraps a distribution message with a label key.
-5. Storage: sessions, sending keys and label keys in the encrypted store, with
-   the same atomic-commit and backup-exclusion rules as one-to-one.
-6. Limits on hand-overs, sessions and stored keys per group, so that a hostile
-   member cannot exhaust a phone.
-7. Multiple devices per member (3.1).
+Done by Claude on 26 November 2026, against libsignal's source at the pinned
+revision and the measurement in 3.9. This is the proposal's own author checking
+it: **not an independent review**.
+
+1. **No one-time pre-keys.** *Resolved:* replay of a first message is refused
+   by libsignal's record of used base keys, confirmed by measurement. Yap must
+   store that record permanently and replace bundles monthly (3.2).
+2. **Checkpoints and concurrent branches.** *Proposed:* state hashes on every
+   event, held events, later checkpoints, and confirmation by a second member
+   (3.3, step 5). This changes the event format in `groups/`. It needs a
+   canonical state encoding and split tests before it is relied on.
+3. **Knowing a hand-over arrived.** *Proposed:* the recipient sends a small
+   encrypted acknowledgement over their session, as one-to-one receipts work.
+   The sender resends unacknowledged pieces, batched, on the mesh's retry
+   schedule. It stops when the recipient is no longer an active member, or once
+   the envelope lifetime has passed, leaving it to the next key change. A member
+   who receives a group message under a sending key it does not have asks the
+   sender for a resend, at most once per sender per hour.
+4. **Encodings.** *Proposed layouts.* Every field has a fixed size or a length
+   limit, and each kind starts with its own tag. A hash covers a tag naming its
+   purpose as well as the bytes.
+   - Hand-over piece: `YGH1`, group ID (16), distribution ID (16), label key
+     (32), the distribution message (length-prefixed, at most 256 bytes).
+   - Group message header, inside the encryption: `YGM1`, group ID (16), sender
+     member key (32), message ID (16), distribution ID (16), log heads (count of
+     at most `MAX_PARENTS`, then 32 each), kind (1), payload.
+   - Checkpoint: `YGS1` then each part in sorted order. State hash =
+     SHA-256 of the tag `Yap group state v1` followed by the checkpoint.
+
+   Exact limits and test vectors come with the code review.
+5. **Storage.** *Proposed:* the endpoint's encrypted snapshot and staged commits
+   (see the [protocol proposal](../protocol-proposal.md)), extended with a
+   sender-key store. Advancing a sending key is committed together with the
+   outgoing envelope, and retries resend the stored bytes. Old sending keys are
+   deleted by local elapsed time, never by the sender's clock. Everything stays
+   excluded from backups.
+6. **Limits against a hostile member.** *Proposed:*
+   - at most 127 sessions per group, following the member cap;
+   - at most 4 sending keys kept per member (current and recent);
+   - at most 4 hand-overs accepted from one member per hour, and above that
+     they are ignored and the app warns;
+   - libsignal lets a message skip up to 25,000 chain steps
+     (`MAX_FORWARD_JUMPS`), so a hostile member can make every phone do that
+     work per message. Yap should drop a message more than 2,000 steps ahead of
+     the last one seen from that sender, before handing it to libsignal. The
+     pinned API makes this possible: `SenderKeyMessage::iteration` reads the
+     step number without decrypting.
+7. **Multiple devices.** *Shelved for now (user, 26 November 2026).* Each device would be its own
+   libsignal address with its own bundle, sessions and sending key, so
+   hand-overs grow with the number of devices. This needs its own proposal,
+   together with the device rules in §5 of the spec.
+
+Also still open: the review in 3.10, which depends on the local mesh design, and
+an independent review of the whole design. Multiple devices per member are
+shelved: version 1 is one device per member.
 
 ## 6. Tests required before release
 
@@ -397,6 +503,15 @@ elsewhere, and never call the temporary group safe.
   sender header that does not match how they were received.
 - A message from a removed member arriving after the removal is dropped
   (choice 2).
+- A replayed first hand-over is refused after a restart (the base-key record
+  survives).
+- A removal in a group of 128 produces 127 envelopes, each under the envelope
+  limit, and fits the relay limits.
+- A newcomer holds events from a concurrent branch, then continues from a later
+  checkpoint. A false state hash is caught when a second member's event does
+  not match.
+- A checkpoint names no removed member in readable form.
+- A message skipping more than 2,000 chain steps is dropped before decryption.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.
