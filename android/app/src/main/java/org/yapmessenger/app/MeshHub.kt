@@ -47,8 +47,10 @@ internal enum class MeshTransport { BLUETOOTH, WIFI }
  * What actually carries a link, for display only. [MeshTransport] stays two-valued because
  * duplicate handling only cares whether a link is Wi-Fi; this tells the user which Wi-Fi.
  */
-internal enum class MeshLink(val label: String) {
-    BLUETOOTH("Bluetooth"), WIFI_AWARE("Wi-Fi Aware"), WIFI_DIRECT("Wi-Fi Direct"), WIFI_NETWORK("Wi-Fi network");
+internal enum class MeshLink(val label: String, val rank: Int) {
+    // rank: which to keep when two links reach the same phone (higher wins). Aware is direct
+    // and long-range; a router link dies when either phone leaves the network.
+    BLUETOOTH("Bluetooth", 0), WIFI_NETWORK("Wi-Fi network", 1), WIFI_DIRECT("Wi-Fi Direct", 2), WIFI_AWARE("Wi-Fi Aware", 3);
     companion object {
         /** Android gives Wi-Fi Direct groups 192.168.49.0/24; any other Wi-Fi address is a shared network or hotspot. */
         fun forWifiAddress(address: String?): MeshLink = if (address?.startsWith("192.168.49.") == true) WIFI_DIRECT else WIFI_NETWORK
@@ -136,6 +138,8 @@ internal class MeshHub(
 
     fun connections(): List<Peer> = peersSnapshot()
     fun isLinked(id: ByteArray): Boolean = synchronized(peers) { peers.containsKey(meshToken(id)) }
+    /** What carries the current link to [id], or null if there is none. */
+    fun linkTo(id: ByteArray): MeshLink? = synchronized(peers) { peers[meshToken(id)]?.link }
     private fun peersSnapshot() = synchronized(peers) { peers.values.toList() }
 
     /**
@@ -176,11 +180,12 @@ internal class MeshHub(
     /**
      * Two phones can end up with two links to each other (both dialled, or Bluetooth
      * and Wi-Fi at once). Both sides must keep the SAME one, so the choice uses only
-     * values both sides know: prefer Wi-Fi, then the link whose initiator sent the
-     * lower (ID, nonce) pair.
+     * values both sides know: the better [MeshLink.rank] (both ends label a link the same
+     * way), then the link whose initiator sent the lower (ID, nonce) pair. Ranking by kind,
+     * not just Wi-Fi versus Bluetooth, stops a dying router link beating a fresh Aware link.
      */
     private fun prefer(candidate: Peer, existing: Peer): Boolean {
-        if (candidate.transport != existing.transport) return candidate.transport == MeshTransport.WIFI
+        if (candidate.link.rank != existing.link.rank) return candidate.link.rank > existing.link.rank
         return compareBytes(candidate.initiatorKey, existing.initiatorKey) < 0
     }
 

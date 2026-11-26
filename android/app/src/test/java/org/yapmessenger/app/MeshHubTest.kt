@@ -188,6 +188,41 @@ class MeshHubTest {
         assertNull(MeshWifi.linkIdFromName("yap-" + "G".repeat(32)))
     }
 
+    /** Connect two hubs with a given link kind (loopback TCP stands in for every radio here). */
+    private fun linkAs(a: MeshHub, b: MeshHub, kind: MeshLink) {
+        val transport = if (kind == MeshLink.BLUETOOTH) MeshTransport.BLUETOOTH else MeshTransport.WIFI
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            val client = Socket(InetAddress.getLoopbackAddress(), server.localPort)
+            val accepted = server.accept()
+            sockets += client; sockets += accepted
+            a.attach(MeshStream(client.getInputStream(), client.getOutputStream(), client), transport, outbound = true, link = kind)
+            b.attach(MeshStream(accepted.getInputStream(), accepted.getOutputStream(), accepted), transport, outbound = false, link = kind)
+        }
+    }
+
+    /** A router link can die unnoticed when a phone leaves the network; an Aware link must win over it. */
+    @Test fun awareReplacesARouterLinkOnBothPhones() {
+        for (awareFromB in listOf(false, true)) { // either phone may be the Aware initiator
+            val a = hub(); val b = hub()
+            linkAs(a, b, MeshLink.WIFI_NETWORK)
+            waitFor { a.connections().size == 1 && b.connections().size == 1 }
+            if (awareFromB) linkAs(b, a, MeshLink.WIFI_AWARE) else linkAs(a, b, MeshLink.WIFI_AWARE)
+            waitFor { a.connections().singleOrNull()?.link == MeshLink.WIFI_AWARE && b.connections().singleOrNull()?.link == MeshLink.WIFI_AWARE }
+        }
+    }
+
+    /** The reverse: a router or Bluetooth link arriving later never replaces an Aware link. */
+    @Test fun aWorseLinkNeverReplacesABetterOne() {
+        val a = hub(); val b = hub()
+        linkAs(a, b, MeshLink.WIFI_AWARE)
+        waitFor { a.connections().size == 1 && b.connections().size == 1 }
+        linkAs(b, a, MeshLink.WIFI_NETWORK)
+        linkAs(a, b, MeshLink.BLUETOOTH)
+        Thread.sleep(300)
+        assertEquals(MeshLink.WIFI_AWARE, a.connections().single().link)
+        assertEquals(MeshLink.WIFI_AWARE, b.connections().single().link)
+    }
+
     /** The UI must name the real radio: Bluetooth, Wi-Fi Aware, Wi-Fi Direct or a shared Wi-Fi network. */
     @Test fun eachLinkKnowsWhatCarriesIt() {
         assertEquals(MeshLink.WIFI_DIRECT, MeshLink.forWifiAddress("192.168.49.1"))
