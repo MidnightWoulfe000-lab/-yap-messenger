@@ -128,34 +128,47 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - How to converge deterministically without allowing an attacker to manipulate time.
 - What users see while the group's governance state is uncertain.
 
-## 9. Move to Secure New Group
+## 9. Move to Secure New Group: protection during mesh isolation
 
-**Provenance:** The user confirmed that “Move to Secure New Group” was discussed previously, but the exact original rules are not recoverable from the currently accessible project conversation and repository. The behaviour below is a **provisional reconstruction**, not a claim that these specific steps were agreed. Codex must not implement it as an approved protocol without review.
+**Confirmed user clarification (26 November 2026).** This is **not** primarily a procedure for evacuating a compromised group. It addresses a **small part of an existing group becoming isolated from the larger mesh**, so its members can no longer know whether somebody has been revoked elsewhere.
 
-**Purpose to preserve**
-- Yap needs a way for members of a room that is no longer considered safe to move their ongoing conversation into a **separate, newly secured room**, rather than assuming that a revocation or a scramble command can make an already exposed room safe again.
-- This is conceptually distinct from ordinary member removal, secondary-device revocation, confiscation reporting and the original room's join approval mechanism.
+### Confirmed product behaviour
+- A room may be split into a **larger connected network** and a **small isolated subset**.
+- The isolated members may miss governance updates, including a member or device being revoked on the larger side.
+- Because the subset **cannot confirm the current revocation state**, Yap should **prompt those isolated members to create a new, secure group** for their local conversations.
+- That secure group is a **temporary way to continue communicating during isolation**, until they can reconnect with the larger network and reconcile what happened.
+- The aim is to avoid treating a stale copy of the original group's membership as definitely trustworthy.
 
-**Proposed security requirements, subject to review**
-1. A destination room has its **own room identity and fresh cryptographic key material**. Reusing the compromised room key defeats the purpose.
-2. Only the members/devices explicitly authorised for the new room receive access. Merely belonging to the old room must not grant access.
-3. Invitations, membership information and key material for the new room must **not be broadcast into the compromised old room** where excluded members could read them. Use an authenticated, confidential invitation path.
-4. Members need to know which room they are in. The app must not quietly relabel an old room and imply its security state has changed.
-5. **Past messages are not made secret retroactively.** Any content, keys, screenshots or exports already obtained from the old room remain exposed to whoever possesses them.
-6. If any invited device is itself compromised, the new room may also be compromised. Migration does not replace identity and device verification.
-7. The old room and any local history must not be automatically deleted without a clearly specified, consent-aware rule. Best-effort scramble is a separate mechanism.
+This feature is separate from voting to revoke someone, remote scramble, confiscation reporting and simply rotating the keys of the original group.
 
-**Exact mechanics still unknown from accessible source material**
-- Who may trigger the migration, and whether it requires a group vote, threshold or emergency override.
-- Whether the migration selects members manually, proposes a filtered roster, or uses the outcomes of confiscation/revocation votes.
-- Whether individual participants must explicitly accept, and whether the destination room's normal approval/objection window applies.
-- How the new room's invitation reaches disconnected or partitioned members without revealing the move to excluded parties.
-- Whether the old group shows a migration notice, is archived, remains available or is abandoned.
-- Whether any chat history, attachments, settings or governance history move with members, and if so what can be safely imported.
-- What happens if different partitions initiate competing “secure new group” migrations.
-- Whether anyone can detect that a new room exists through traffic analysis, even without decrypting it.
+### Security properties the implementation must provide (design requirements, not settled mechanics)
+1. Clearly show **membership/revocation state is uncertain** while partitioned; do not suggest that the isolated phones know who has or has not been revoked elsewhere.
+2. Create the new group with a **different group identity and fresh cryptographic keys**, not a copy of the original group's room key.
+3. Give access to the new group only to participants **explicitly enrolled and authenticated for that new group**. Do not copy the old membership list as proof of current authorisation.
+4. Do not silently forward keys, messages, attachments or governance records between the original and temporary rooms.
+5. When connectivity to the larger network returns, synchronise and verify signed governance updates before treating the original room as current. **Reconnection is not an automatic security guarantee**.
+6. Keep the temporary room distinguishable from the original room; users must understand which room receives a message.
 
-**Required Codex behaviour:** Keep this feature visible in the roadmap, draft a separate reviewed state machine before implementation, and **ask for confirmation of the exact original mechanics** rather than turning the proposals above into assumed decisions.
+### Security limitation
+A disconnected subset **cannot discover revocations that happened elsewhere until information reaches it**. A newly formed group reduces reliance on *stale old-group membership*, but it cannot prove that each participant is still trusted by the wider group. If a revoked or compromised device is physically present in the isolated subset and admitted to the new room, the new room is not safe from it. The feature must be described as a risk-reduction option, **not a guarantee that isolation is secure**.
+
+### Open questions requiring user decisions and protocol review
+- What should trigger the prompt: a measured isolation period, loss of a quorum, loss of particular peers, or another signal? A phone does not necessarily know whether it is in the minority partition.
+- Should Yap only **offer** the move, or should it block sending in the original room after some threshold? The clarified direction explicitly says **prompt**.
+- Who may create the temporary group, who is invited, and how each person's device/identity is authenticated during isolation?
+- Does the new temporary group use the standard first-two-member exemption and approval/objection rules, or a special isolated-room bootstrap?
+- How can the subset check for a locally known revocation, and how does it handle suspects or conflicting local governance information?
+- On reconnect, does the temporary group remain as a separate conversation, get archived or offer a carefully verified return to the original room? **Do not silently merge members, keys or histories.**
+- What happens if several isolated subsets each create a different temporary group?
+- How are pending messages and room history handled during the split and after reconciliation?
+
+### Required tests before shipping
+- Small subgroup becomes isolated while the main network revokes a device: show the **uncertainty prompt** without pretending the subgroup saw the revocation.
+- Isolated members establish a separate new room with fresh keys; original group membership does **not** grant automatic access.
+- Reconnected devices learn valid signed revocation updates, and the UI updates without implicitly merging the temporary room.
+- A compromised/revoked device in the isolated subset must not be described as safe merely because a new group was created.
+
+**Instruction to Codex:** Implement none of these unconfirmed state-machine details without a reviewed specification. Preserve the confirmed user intent: **prompt isolated members to establish a separate secure group because they lack up-to-date revocation information, then reconcile when the wider mesh reconnects**.
 
 ## 10. Privacy and metadata
 
@@ -200,13 +213,13 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 4. Define device self-revocation, group revocation and confiscation-vote state machines.
 5. Define deterministic convergence for partitions without trusting device clocks.
 6. Define key rotation, access to past/future messages and metadata visibility.
-7. Specify and review Move to Secure New Group: trigger, eligible members, separate keys, private invitations, migration consent, partitions and history policy.
+7. Specify and review the isolation fallback: how to detect uncertain revocation state, prompt the isolated subset to form a separately keyed temporary group, and safely reconcile on reconnection.
 8. Threat-model malicious insiders, forged events, replay, denial of service and compromised devices.
 9. Write tests for two-member bootstrap, concurrent invitations, objections, partitioned votes, conflicting revocations, late arrivals and reconnection.
 10. Validate behaviour on real Android devices before expanding to iOS.
 
 ## 14. Implementation status
 
-As of November 2026, these group mechanics are **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, secure-room migration or remote deletion.
+As of November 2026, these group mechanics are **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, isolation fallback groups or remote deletion.
 
 **Instruction to Codex:** Treat the **Agreed direction** sections as product intent, the **Open** sections as decisions requiring the user's input, and the security qualifications as non-negotiable engineering cautions. Do not silently invent or claim implementation of missing rules.
