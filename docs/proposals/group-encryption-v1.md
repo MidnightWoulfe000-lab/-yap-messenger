@@ -481,14 +481,14 @@ it: **not an independent review**.
      the last one seen from that sender, before handing it to libsignal. The
      pinned API makes this possible: `SenderKeyMessage::iteration` reads the
      step number without decrypting.
-7. **Multiple devices.** *Shelved for now (user, 26 November 2026).* Each device would be its own
+7. **Multiple devices.** *A planned future feature (user, 26 November 2026); for now, one device per member.* Each device would be its own
    libsignal address with its own bundle, sessions and sending key, so
    hand-overs grow with the number of devices. This needs its own proposal,
    together with the device rules in §5 of the spec.
 
 Also still open: the review in 3.10, which depends on the local mesh design, and
-an independent review of the whole design. Multiple devices per member are
-shelved: version 1 is one device per member.
+an independent review of the whole design. Multiple devices per member are a
+planned future feature; version 1 is one device per member.
 
 ## 6. Tests required before release
 
