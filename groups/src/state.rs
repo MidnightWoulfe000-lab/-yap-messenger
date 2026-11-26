@@ -1064,8 +1064,9 @@ fn admit_member(state: &mut GroupState, candidate: MemberKey, sponsor: MemberKey
         status: MemberStatus::Active,
         earlier_terms: Vec::new(),
     };
-    // Coming back: keep the record of the earlier membership, and keep every
-    // old device revoked. They must add devices afresh.
+    // Coming back: keep the record of the earlier membership. Their old
+    // devices work again (user, 26 November 2026); a device they revoked
+    // themselves stays revoked.
     if let Some(old) = state.members.remove(&candidate) {
         if let MemberStatus::Revoked { revocation } = old.status {
             member.earlier_terms = old.earlier_terms;
@@ -1075,8 +1076,8 @@ fn admit_member(state: &mut GroupState, candidate: MemberKey, sponsor: MemberKey
                 revocation,
             });
         }
+        member.devices = old.devices;
         member.revoked_devices = old.revoked_devices;
-        member.revoked_devices.extend(old.devices);
     }
     state.members.insert(candidate, member);
 }

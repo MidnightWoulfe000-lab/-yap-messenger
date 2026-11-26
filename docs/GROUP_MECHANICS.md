@@ -16,6 +16,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 **Agreed direction**
 - A member creates a room and invites another person through a QR code.
 - The QR invitation carries room-joining information, discussed as a **room key**.
+- **Group invite QRs change over time, as personal QRs do** (user, 26 November 2026), so an old photo of an invite stops working. How often they change, and whether an invite is one-use, is still open.
 - The **first two members are exempt** from the later approval/objection process. This allows the room to be established.
 - Room membership must subsequently be verified rather than inferred from physical proximity or a Bluetooth connection.
 
@@ -139,7 +140,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - Built in `groups/`: each vote carries the list of members its proposer's phone saw as active, majorities count from that list, and only members on it can vote. If a phone's own records disagree with the list, **the vote's list wins** (user, 26 November 2026); the phone can show a warning but counts from the list.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
-  - Details stage one chose (need confirming): the earlier membership stays on record; every device they had before stays revoked, so they must add devices afresh; and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
+  - **They can come back on their old devices** (user, 26 November 2026); they only need a new invite. A device they revoked themselves, for example because it was lost, stays revoked (proposed by Claude, accepted by user, 26 November 2026).
+  - Details stage one chose (need confirming): the earlier membership stays on record, and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
 
 **Open**
 - Which membership list counts when the group is split (§8). A majority of all members cannot be reached inside a small isolated subset, which fails safe but means that subset cannot revoke anyone.

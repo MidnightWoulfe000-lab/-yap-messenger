@@ -36,7 +36,7 @@ Where the specification is still open, the crate either leaves the feature out o
 ## Provisional choices made while building (need confirming)
 
 - **Group size for a revocation vote** is counted when the vote starts.
-- **Coming back after revocation** (decided: through a new proposal) keeps the earlier membership on record, keeps every old device revoked, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
+- **Coming back after revocation** (decided: through a new proposal) keeps the earlier membership on record, lets their old devices work again (user, 26 November 2026) except any they revoked themselves, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
 - **Owner scramble** is available whenever the device has a password set; there is no separate opt-in.
 - **Every vote's voters are its list.** Only members on a vote's list may vote on it, including in groups of 6 or more where removal needs a fixed 3 votes.
 - **An empty list counts every current member.** That can only make a vote harder to pass, so a phone with no activity records is never at an advantage.

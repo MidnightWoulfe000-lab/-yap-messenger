@@ -264,7 +264,11 @@ fn revoked_member_can_come_back_through_a_new_proposal() {
     let (mut log, p) = group_of(3, true, true);
     let target = &p[2];
     let old_phone = DeviceKey([5; 32]);
-    log.append(target, Body::AddDevice { device: old_phone })
+    let lost_phone = DeviceKey([6; 32]);
+    for device in [old_phone, lost_phone] {
+        log.append(target, Body::AddDevice { device }).unwrap();
+    }
+    log.append(target, Body::RevokeOwnDevice { device: lost_phone })
         .unwrap();
     let r = revoke(&mut log, &p[0], &p[1], target);
 
@@ -292,10 +296,11 @@ fn revoked_member_can_come_back_through_a_new_proposal() {
     assert_eq!(member.earlier_terms[0].revocation, r);
     assert_eq!(member.earlier_terms[0].sponsor, Some(p[0].key()));
 
-    // Old devices stay revoked; they must add a new one.
-    assert!(member.devices.is_empty() && member.revoked_devices.contains(&old_phone));
+    // Their old phone works again; the one they revoked themselves does not.
+    assert!(member.devices.contains(&old_phone));
+    assert!(member.revoked_devices.contains(&lost_phone));
     let reuse = log
-        .append(target, Body::AddDevice { device: old_phone })
+        .append(target, Body::AddDevice { device: lost_phone })
         .unwrap();
     assert_eq!(log.is_valid(&reuse), Some(false));
 }
