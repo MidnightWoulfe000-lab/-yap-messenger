@@ -137,7 +137,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - In groups of 2–3 members a majority can be just 2 people. **Confirmed as intended.**
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
   - **Updated (user, 26 November 2026): every majority vote counts only members active in the last 30 days** (measured as in §3). This applies to removal votes in groups of up to 5, overriding a rejection, removing or electing a SuperAdmin, and switching a collective back to a normal group. Members who have not been active are left out of the count. The fixed threshold of 3 approvals in groups of 6 or more is unchanged.
-  - Built in `groups/`: each vote carries the list of members its proposer's phone saw as active, majorities count from that list, and only members on it can vote. If a phone's own records disagree with the list, **the vote's list wins** (user, 26 November 2026); the phone can show a warning but counts from the list.
+  - Built in `groups/`: each vote carries the list of members its proposer's phone saw as active, majorities count from that list, and only members on it can vote (accepted by user, 26 November 2026). Every vote must carry a list, naming at least whoever started it. If a phone's own records disagree with the list, **the vote's list wins** (user, 26 November 2026); the phone can show a warning but counts from the list.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
   - **They can come back on their old devices** (user, 26 November 2026); they only need a new invite. A device they revoked themselves, for example because it was lost, stays revoked (proposed by Claude, accepted by user, 26 November 2026).
@@ -145,7 +145,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 
 **Open**
 - Which membership list counts when the group is split (§8). A majority of all members cannot be reached inside a small isolated subset, which fails safe but means that subset cannot revoke anyone.
-- Whether the threshold uses the group's size when the vote starts or when it ends, if members join or leave during the vote.
+- ~~Whether the threshold uses the group's size when the vote starts or when it ends, if members join or leave during the vote.~~ **Decided (proposed by Claude, accepted by user, 26 November 2026):** the size when the vote starts.
+- **A group holds at most 128 members for now** (user, 26 November 2026).
 - With group revoking switched off, how a confiscated device (§7) is dealt with.
 - Whether a sponsor has any special responsibility. (The target cannot vote: decided above.)
 - Distinction between removing a device, suspending a member, and expelling a member.

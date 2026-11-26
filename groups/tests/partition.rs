@@ -29,7 +29,7 @@ fn arrival_order_does_not_change_the_result() {
         .append(
             &p[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: p[3].key(),
             },
         )
@@ -92,7 +92,7 @@ fn late_objection_admission_stands_and_objector_is_told() {
         .append(
             &p[3],
             Body::Object {
-                electorate: vec![],
+                electorate: everyone(&right),
                 proposal,
                 age_ms: 30_000,
                 reason: "Saw them with the police".into(),
@@ -120,7 +120,7 @@ fn late_objection_admission_stands_and_objector_is_told() {
         .append(
             &p[3],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&left),
                 target: x.key(),
             },
         )
@@ -144,7 +144,7 @@ fn revoked_elsewhere_is_out_after_sync_but_earlier_actions_stand() {
         .append(
             &p[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&left),
                 target: e.key(),
             },
         )
@@ -202,7 +202,7 @@ fn small_isolated_subset_cannot_reach_a_majority() {
         .append(
             &p[3],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: p[0].key(),
             },
         )
@@ -218,7 +218,7 @@ fn large_group_subset_of_three_can_revoke() {
         .append(
             &p[4],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: p[0].key(),
             },
         )

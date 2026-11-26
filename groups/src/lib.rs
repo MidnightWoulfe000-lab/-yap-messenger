@@ -23,7 +23,7 @@ pub mod state;
 pub use activity::{ActivityLog, ElectorateCheck, ACTIVE_WINDOW_MS};
 pub use age::{AgedItem, Hop};
 pub use error::{Error, Result};
-pub use event::{Body, Event, GroupId, GroupType, Hash, JoinRequest, Settings};
+pub use event::{Body, Event, GroupId, GroupType, Hash, JoinRequest, Settings, MAX_MEMBERS};
 pub use keys::{DeviceKey, Identity, MemberKey};
 pub use password::{Check, PasswordGuard};
 pub use scramble::{Decision, Rejection, Scope, ScrambleCommand, ScrambleGuard, Trigger};

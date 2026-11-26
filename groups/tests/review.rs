@@ -9,7 +9,7 @@ fn reject(log: &mut Log, who: &Identity, proposal: Hash, reason: &str) -> Hash {
     log.append(
         who,
         Body::Object {
-            electorate: vec![],
+            electorate: everyone(log),
             proposal,
             age_ms: EARLY,
             reason: reason.into(),

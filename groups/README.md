@@ -33,14 +33,14 @@ Where the specification is still open, the crate either leaves the feature out o
 - `LateObjection` (decided): an objection from the other side of a split mesh that arrives after the member was admitted. The admission stands; `notices_for` gives the objector a notice, and `can_challenge` says whether they can start a removal vote against the new member.
 - `ActedWhileRevoked` (decided): a member revoked on one side keeps acting on the other side. What they did before the sync stands, including their messages and governance actions; once the revocation reaches a device, they are out.
 
-## Provisional choices made while building (need confirming)
+## Choices made while building (proposed by Claude, accepted by user, 26 November 2026)
 
-- **Group size for a revocation vote** is counted when the vote starts.
-- **Coming back after revocation** (decided: through a new proposal) keeps the earlier membership on record, lets their old devices work again (user, 26 November 2026) except any they revoked themselves, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
+- **Group size for a vote** is counted when the vote starts.
+- **Coming back after revocation** (through a new proposal) keeps the earlier membership on record, lets their old devices work again except any they revoked themselves, and refuses a proposal made before a later revocation, so old approvals cannot be reused.
 - **Owner scramble** is available whenever the device has a password set; there is no separate opt-in.
 - **Every vote's voters are its list.** Only members on a vote's list may vote on it, including in groups of 6 or more where removal needs a fixed 3 votes.
-- **An empty list counts every current member.** That can only make a vote harder to pass, so a phone with no activity records is never at an advantage.
-- **A list holds at most 128 members**, so a vote in a larger group cannot yet name everyone active.
+- **Every vote must carry a list.** It always names at least the person who started the vote, so it is never empty.
+- **A group holds at most 128 members** (user, 26 November 2026), so a vote's list can always name everyone active.
 
 ## Known weakness (accepted)
 

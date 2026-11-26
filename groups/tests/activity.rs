@@ -71,21 +71,45 @@ fn majorities_count_only_the_active_members_listed() {
 }
 
 #[test]
-fn an_empty_list_counts_every_member() {
-    let (mut log, p) = group_of(5, true, true);
-    let r = log
-        .append(
-            &p[0],
-            Body::ProposeRevoke {
-                target: p[4].key(),
-                electorate: vec![],
-            },
-        )
+fn every_vote_must_carry_a_list() {
+    let (log, p) = group_of(3, true, true);
+    let empty = Event::create(
+        &p[0],
+        log.group(),
+        log.heads(),
+        Body::ProposeRevoke {
+            target: p[2].key(),
+            electorate: vec![],
+        },
+    );
+    assert!(empty.is_err());
+}
+
+#[test]
+fn a_group_holds_at_most_128_members() {
+    let (mut log, a, b) = normal_group(false);
+    for n in 0..(MAX_MEMBERS - 2) as u32 {
+        let request = JoinRequest::sign(&big_id(n), log.group());
+        log.append(&a, Body::AdminAdd { request }).unwrap();
+    }
+    assert_eq!(log.state().unwrap().active_count(), MAX_MEMBERS);
+    let request = JoinRequest::sign(&big_id(999), log.group());
+    let full = log.append(&a, Body::AdminAdd { request }).unwrap();
+    assert_eq!(log.is_valid(&full), Some(false));
+
+    // Once someone leaves, there is room again.
+    log.append(&a, Body::AdminRemove { target: b.key() })
         .unwrap();
-    log.append(&p[1], Body::VoteRevoke { proposal: r }).unwrap();
-    assert!(log.state().unwrap().is_active(&p[4].key()), "needs 3 of 4");
-    log.append(&p[3], Body::VoteRevoke { proposal: r }).unwrap();
-    assert!(!log.state().unwrap().is_active(&p[4].key()));
+    let request = JoinRequest::sign(&big_id(1000), log.group());
+    let added = log.append(&a, Body::AdminAdd { request }).unwrap();
+    assert_eq!(log.is_valid(&added), Some(true));
+}
+
+/// Distinct identities beyond the 255 that `id` can make.
+fn big_id(n: u32) -> Identity {
+    let mut seed = [7u8; 32];
+    seed[1..5].copy_from_slice(&n.to_le_bytes()); // byte 0 loses bits to key clamping
+    Identity::from_seed(seed)
 }
 
 #[test]

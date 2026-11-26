@@ -96,6 +96,11 @@ pub fn group_of(n: u8, independent_approval: bool, group_revoking: bool) -> (Log
 }
 
 /// Copies every event `from` has that `to` lacks.
+/// Every current member, as the list for a new vote.
+pub fn everyone(log: &Log) -> Vec<MemberKey> {
+    log.state().unwrap().active_members()
+}
+
 pub fn sync(from: &Log, to: &mut Log) {
     for event in from.events() {
         to.insert(event.clone()).unwrap();

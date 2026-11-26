@@ -11,7 +11,7 @@
 //! as soon as the revocation reaches a device; what they did before that
 //! stands.
 
-use crate::event::{Body, Event, GroupId, GroupType, Hash, Settings, MAX_PARENTS};
+use crate::event::{Body, Event, GroupId, GroupType, Hash, Settings, MAX_MEMBERS, MAX_PARENTS};
 use crate::keys::{DeviceKey, Identity, MemberKey};
 use crate::{Error, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -479,11 +479,11 @@ impl Log {
         let state = self.derive(&view)?;
         let valid = check(&state, &event);
         let by_super = state.is_super_admin(&event.author);
-        let electorate = match event.body.electorate() {
-            Some([]) => state.active_members(),
-            Some(list) => list.to_vec(),
-            None => Vec::new(),
-        };
+        let electorate = event
+            .body
+            .electorate()
+            .map(<[MemberKey]>::to_vec)
+            .unwrap_or_default();
         self.events.insert(
             hash,
             Stored {
@@ -692,13 +692,15 @@ fn check(state: &GroupState, event: &Event) -> bool {
             return false;
         }
     }
-    let lists_author = |list: &[MemberKey]| list.is_empty() || list.contains(&author);
+    let lists_author = |list: &[MemberKey]| list.contains(&author);
     let window = state.settings.objection_window_ms();
     let open = |proposal: &Hash| {
         state.join_proposals.get(proposal).filter(|p| {
             p.admitted.is_none() && state.revoked_by(&p.candidate) == p.candidate_revoked_by
         })
     };
+    // A group holds at most MAX_MEMBERS members (user, 26 November 2026).
+    let room = state.active_count() < MAX_MEMBERS;
     let valid_request = |request: &crate::event::JoinRequest| {
         request.group == state.group
             && request.verify()
@@ -750,9 +752,9 @@ fn check(state: &GroupState, event: &Event) -> bool {
                         && overriders >= state.override_threshold(o)
                 });
             let waited = !state.uses_rejection_review() || *age_ms >= window;
-            p.sponsor == author && waited && answered && state.eligible_approvals(p) >= 1
+            room && p.sponsor == author && waited && answered && state.eligible_approvals(p) >= 1
         }),
-        Body::AdminAdd { request } => state.is_admin(&author) && valid_request(request),
+        Body::AdminAdd { request } => room && state.is_admin(&author) && valid_request(request),
         // Ordinary admins remove ordinary members; only the SuperAdmin removes
         // an admin; nobody removes the SuperAdmin this way.
         Body::AdminRemove { target } => {

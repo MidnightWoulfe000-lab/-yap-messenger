@@ -45,7 +45,7 @@ fn vote_out(log: &mut Log, voters: &[&Identity], target: &Identity) -> Hash {
         .append(
             voters[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(log),
                 target: target.key(),
             },
         )
@@ -179,7 +179,7 @@ fn the_super_admin_can_be_voted_out_even_with_revoking_off() {
         .append(
             b,
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: d.key(),
             },
         )
@@ -283,7 +283,7 @@ fn a_collective_votes_to_become_normal_then_elects() {
         .append(
             a,
             Body::ProposeSettings {
-                electorate: vec![],
+                electorate: everyone(&log),
                 settings,
             },
         )
@@ -361,7 +361,7 @@ fn new_events_round_trip_through_bytes() {
         .append(
             &p[2],
             Body::Object {
-                electorate: vec![],
+                electorate: everyone(&log),
                 proposal: x,
                 age_ms: EARLY,
                 reason: "No".into(),

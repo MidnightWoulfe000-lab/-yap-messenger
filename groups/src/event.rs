@@ -13,8 +13,10 @@ pub const MAX_PARENTS: usize = 16;
 pub const MAX_REJECTIONS: usize = 16;
 pub const MAX_REASON_BYTES: usize = 1000;
 pub const MAX_EVENT_BYTES: usize = 8192;
-/// Most members one vote's electorate can list.
-pub const MAX_ELECTORATE: usize = 128;
+/// Most members a group can have (user, 26 November 2026).
+pub const MAX_MEMBERS: usize = 128;
+/// Most members one vote's electorate can list: the whole group.
+pub const MAX_ELECTORATE: usize = MAX_MEMBERS;
 pub const MIN_OBJECTION_WINDOW_MINUTES: u64 = 1;
 pub const MAX_OBJECTION_WINDOW_MINUTES: u64 = 60;
 
@@ -481,6 +483,9 @@ impl Body {
         if let Some(electorate) = self.electorate() {
             if electorate.len() > MAX_ELECTORATE {
                 return Err(Error::Malformed("electorate too large"));
+            }
+            if electorate.is_empty() {
+                return Err(Error::Malformed("electorate empty"));
             }
             if electorate.windows(2).any(|w| w[0] >= w[1]) {
                 return Err(Error::Malformed("electorate not in canonical order"));

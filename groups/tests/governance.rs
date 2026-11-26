@@ -74,7 +74,7 @@ fn any_objection_blocks_admission() {
         .append(
             &b,
             Body::Object {
-                electorate: vec![],
+                electorate: everyone(&log),
                 proposal: p,
                 age_ms: EARLY,
                 reason: "Not someone I know".into(),
@@ -100,7 +100,7 @@ fn objection_needs_a_reason() {
         log.group(),
         log.heads(),
         Body::Object {
-            electorate: vec![],
+            electorate: everyone(&log),
             proposal: [0; 32],
             age_ms: EARLY,
             reason: "   ".into(),
@@ -117,7 +117,7 @@ fn votes_after_the_window_do_not_count() {
         .append(
             &b,
             Body::Object {
-                electorate: vec![],
+                electorate: everyone(&log),
                 proposal: p,
                 age_ms: WINDOW_MS,
                 reason: "late".into(),
@@ -177,7 +177,7 @@ fn five_member_group_needs_three_of_the_other_four() {
         .append(
             &p[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target,
             },
         )
@@ -204,7 +204,7 @@ fn two_member_group_other_member_alone_revokes() {
         .append(
             &a,
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: b.key(),
             },
         )
@@ -220,7 +220,7 @@ fn group_revoking_switched_off() {
         .append(
             &a,
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: b.key(),
             },
         )
@@ -234,7 +234,7 @@ fn revoke(log: &mut Log, proposer: &Identity, voter: &Identity, target: &Identit
         .append(
             proposer,
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(log),
                 target: target.key(),
             },
         )
@@ -277,7 +277,7 @@ fn revoked_member_can_come_back_through_a_new_proposal() {
     log.append(
         &p[0],
         Body::Object {
-            electorate: vec![],
+            electorate: everyone(&log),
             proposal: blocked,
             age_ms: EARLY,
             reason: "Not yet".into(),
@@ -368,7 +368,7 @@ fn forged_tampered_and_foreign_events_are_rejected() {
         log.group(),
         log.heads(),
         Body::ProposeRevoke {
-            electorate: vec![],
+            electorate: everyone(&log),
             target: a.key(),
         },
     )
@@ -388,7 +388,7 @@ fn forged_tampered_and_foreign_events_are_rejected() {
         GroupId([9; 16]),
         log.heads(),
         Body::ProposeRevoke {
-            electorate: vec![],
+            electorate: everyone(&log),
             target: a.key(),
         },
     )
@@ -433,7 +433,7 @@ fn signing_twice_gives_one_event_hash() {
     // libsignal signatures are randomised; the hash must not depend on them.
     let (log, a, b) = new_group(true, true);
     let body = Body::ProposeRevoke {
-        electorate: vec![],
+        electorate: everyone(&log),
         target: b.key(),
     };
     let first = Event::create(&a, log.group(), log.heads(), body.clone()).unwrap();

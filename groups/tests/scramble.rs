@@ -188,7 +188,7 @@ fn group_scramble_needs_a_verified_revocation() {
         .append(
             &p[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: target.key(),
             },
         )
@@ -218,7 +218,7 @@ fn group_scramble_follows_the_group_setting() {
             .append(
                 &a,
                 Body::ProposeRevoke {
-                    electorate: vec![],
+                    electorate: everyone(&log),
                     target: c.key(),
                 },
             )
@@ -247,7 +247,7 @@ fn old_group_scramble_does_not_apply_after_coming_back() {
         .append(
             &p[0],
             Body::ProposeRevoke {
-                electorate: vec![],
+                electorate: everyone(&log),
                 target: c.key(),
             },
         )
