@@ -128,7 +128,36 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - How to converge deterministically without allowing an attacker to manipulate time.
 - What users see while the group's governance state is uncertain.
 
-## 9. Privacy and metadata
+## 9. Move to Secure New Group
+
+**Provenance:** The user confirmed that “Move to Secure New Group” was discussed previously, but the exact original rules are not recoverable from the currently accessible project conversation and repository. The behaviour below is a **provisional reconstruction**, not a claim that these specific steps were agreed. Codex must not implement it as an approved protocol without review.
+
+**Purpose to preserve**
+- Yap needs a way for members of a room that is no longer considered safe to move their ongoing conversation into a **separate, newly secured room**, rather than assuming that a revocation or a scramble command can make an already exposed room safe again.
+- This is conceptually distinct from ordinary member removal, secondary-device revocation, confiscation reporting and the original room's join approval mechanism.
+
+**Proposed security requirements, subject to review**
+1. A destination room has its **own room identity and fresh cryptographic key material**. Reusing the compromised room key defeats the purpose.
+2. Only the members/devices explicitly authorised for the new room receive access. Merely belonging to the old room must not grant access.
+3. Invitations, membership information and key material for the new room must **not be broadcast into the compromised old room** where excluded members could read them. Use an authenticated, confidential invitation path.
+4. Members need to know which room they are in. The app must not quietly relabel an old room and imply its security state has changed.
+5. **Past messages are not made secret retroactively.** Any content, keys, screenshots or exports already obtained from the old room remain exposed to whoever possesses them.
+6. If any invited device is itself compromised, the new room may also be compromised. Migration does not replace identity and device verification.
+7. The old room and any local history must not be automatically deleted without a clearly specified, consent-aware rule. Best-effort scramble is a separate mechanism.
+
+**Exact mechanics still unknown from accessible source material**
+- Who may trigger the migration, and whether it requires a group vote, threshold or emergency override.
+- Whether the migration selects members manually, proposes a filtered roster, or uses the outcomes of confiscation/revocation votes.
+- Whether individual participants must explicitly accept, and whether the destination room's normal approval/objection window applies.
+- How the new room's invitation reaches disconnected or partitioned members without revealing the move to excluded parties.
+- Whether the old group shows a migration notice, is archived, remains available or is abandoned.
+- Whether any chat history, attachments, settings or governance history move with members, and if so what can be safely imported.
+- What happens if different partitions initiate competing “secure new group” migrations.
+- Whether anyone can detect that a new room exists through traffic analysis, even without decrypting it.
+
+**Required Codex behaviour:** Keep this feature visible in the roadmap, draft a separate reviewed state machine before implementation, and **ask for confirmation of the exact original mechanics** rather than turning the proposals above into assumed decisions.
+
+## 10. Privacy and metadata
 
 **Agreed direction**
 - Minimise unnecessary exposure of neighbours and device identities.
@@ -141,7 +170,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - How to authenticate changing transport identifiers without making users trivially trackable.
 - Retention periods for join records, objections, confiscation reports and revocation events.
 
-## 10. Retention and constrained devices
+## 11. Retention and constrained devices
 
 **Agreed direction**
 - Storage pressure on low-end phones matters.
@@ -155,7 +184,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - How compression interacts with encryption and sensitive-data side channels.
 - How offline nodes learn enough history to validate current membership without receiving disallowed past history.
 
-## 11. Relationship to the mesh
+## 12. Relationship to the mesh
 
 - Group messages may be carried by members or intermediary devices over Bluetooth, Wi-Fi Direct and optional internet bridges.
 - **Transporting a packet does not make the transporter a room member.**
@@ -163,7 +192,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - The message envelope must carry sufficient authenticated information to distinguish routing, membership and governance state.
 - Network topology and neighbour sharing are a separate design area; group governance must not depend on a single permanently connected node.
 
-## 12. Required design work before implementation
+## 13. Required design work before implementation
 
 1. Define identities, device keys, room identifiers and signed event formats.
 2. Specify invitation QR contents and safe key distribution.
@@ -171,12 +200,13 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 4. Define device self-revocation, group revocation and confiscation-vote state machines.
 5. Define deterministic convergence for partitions without trusting device clocks.
 6. Define key rotation, access to past/future messages and metadata visibility.
-7. Threat-model malicious insiders, forged events, replay, denial of service and compromised devices.
-8. Write tests for two-member bootstrap, concurrent invitations, objections, partitioned votes, conflicting revocations, late arrivals and reconnection.
-9. Validate behaviour on real Android devices before expanding to iOS.
+7. Specify and review Move to Secure New Group: trigger, eligible members, separate keys, private invitations, migration consent, partitions and history policy.
+8. Threat-model malicious insiders, forged events, replay, denial of service and compromised devices.
+9. Write tests for two-member bootstrap, concurrent invitations, objections, partitioned votes, conflicting revocations, late arrivals and reconnection.
+10. Validate behaviour on real Android devices before expanding to iOS.
 
-## 13. Implementation status
+## 14. Implementation status
 
-As of November 2026, these group mechanics are **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting or remote deletion.
+As of November 2026, these group mechanics are **design decisions only**. The existing Android proof of concept exchanges short, unauthenticated BLE messages between two phones. It does **not** implement encrypted rooms, signed governance, group voting, reliable relay, confiscation reporting, secure-room migration or remote deletion.
 
 **Instruction to Codex:** Treat the **Agreed direction** sections as product intent, the **Open** sections as decisions requiring the user's input, and the security qualifications as non-negotiable engineering cautions. Do not silently invent or claim implementation of missing rules.
