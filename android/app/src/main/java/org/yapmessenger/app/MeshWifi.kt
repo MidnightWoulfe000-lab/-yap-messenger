@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import java.net.Inet4Address
@@ -78,7 +79,7 @@ internal class MeshWifi(
                 hub.attach(MeshStream(socket.getInputStream(), socket.getOutputStream(), socket, socket.inetAddress?.hostAddress), MeshTransport.WIFI, outbound = false)
             }
         }
-        register(); discover()
+        register(); discover(); watchWifi()
         if (!gatewayScheduled) { gatewayScheduled = true; timer.scheduleWithFixedDelay({ runCatching { dialGateway() } }, 2, 20, TimeUnit.SECONDS) }
         return true
     }
@@ -91,9 +92,38 @@ internal class MeshWifi(
         discovery?.let { runCatching { nsd.stopServiceDiscovery(it) } }; discovery = null
         runCatching { server?.close() }; server = null
         synchronized(resolving) { resolving.clear(); resolveBusy = false }
+        wifiWatch?.let { runCatching { connectivity.unregisterNetworkCallback(it) } }; wifiWatch = null
     }
 
     fun close() { stop(); timer.shutdownNow(); io.shutdownNow() }
+
+    private var wifiWatch: ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Leaving a Wi-Fi network (walking out of range, or switching it off) used to leave its
+     * links looking alive for up to 25 s, until nothing had been received. Meanwhile Bluetooth
+     * and Aware skipped that phone because it still counted as linked. Close them as soon as
+     * Android says the network is gone, so another radio can take over at once.
+     */
+    private fun watchWifi() {
+        if (wifiWatch != null) return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) { dropLinksWithoutRoute() }
+        }
+        runCatching {
+            connectivity.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), callback)
+            wifiWatch = callback
+        }
+    }
+
+    /** Close shared-network links whose peer address no longer belongs to any network we have. */
+    private fun dropLinksWithoutRoute() {
+        hub.connections().filter { it.link == MeshLink.WIFI_NETWORK }.forEach { peer ->
+            // Numeric address only, so this never does a DNS lookup.
+            val address = peer.remoteAddress?.let { runCatching { InetAddress.getByName(it) }.getOrNull() }
+            if (address == null || networkFor(address) == null) peer.close("Wi-Fi network lost")
+        }
+    }
 
     private fun configure(socket: Socket) { socket.tcpNoDelay = true; socket.keepAlive = true }
 

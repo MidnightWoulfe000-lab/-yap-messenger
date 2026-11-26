@@ -177,6 +177,7 @@ internal class MeshWifiAware(
                 override fun onAttached(attached: WifiAwareSession) {
                     synchronized(this@MeshWifiAware) { attaching = false; if (!running) { attached.close(); return }; session = attached }
                     MeshLog.i("aware: attached")
+                    logLimits()
                     restartDiscovery()
                 }
                 override fun onAttachFailed() {
@@ -188,6 +189,24 @@ internal class MeshWifiAware(
                 override fun onAwareSessionTerminated() { teardown() }
             }, main)
         }.onFailure { MeshLog.i("aware: attach threw ${it.javaClass.simpleName}"); attaching = false; report("Wi-Fi Aware is unavailable; trying Wi-Fi Direct instead"); failed() }
+    }
+
+    /**
+     * How many Aware links this phone's chip allows is set by the hardware and not published
+     * anywhere, so ask the phone: maximum data paths (NDPs), data interfaces and sessions
+     * (Android 13+), and how many data paths are free right now (Android 12+).
+     */
+    private fun logLimits() {
+        val aware = manager ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 33) aware.characteristics?.let {
+                MeshLog.i("aware limits: data paths=${it.numberOfSupportedDataPaths}, data interfaces=${it.numberOfSupportedDataInterfaces}, " +
+                    "publish sessions=${it.numberOfSupportedPublishSessions}, subscribe sessions=${it.numberOfSupportedSubscribeSessions}")
+            }
+            if (Build.VERSION.SDK_INT >= 31) aware.availableAwareResources?.let {
+                MeshLog.i("aware free now: data paths=${it.availableDataPathsCount}, publish=${it.availablePublishSessionsCount}, subscribe=${it.availableSubscribeSessionsCount}")
+            }
+        }.onFailure { MeshLog.i("aware limits unavailable: ${it.javaClass.simpleName}") }
     }
 
     @Synchronized private fun teardown() {
@@ -250,8 +269,13 @@ internal class MeshWifiAware(
 
     /** Ask a discovered publisher to set up a data path. It answers READY when its side is requested. */
     private fun sayHello(peer: PeerHandle, remote: ByteArray) {
-        // Any existing link (Bluetooth included) wins: a Wi-Fi attempt must never disturb a working link.
-        if (hub.isLinked(remote)) return
+        // A router link ("Wi-Fi network") does not block Aware: it dies the moment either phone
+        // leaves the network, and the hub swaps to Aware when both exist. Any other link wins:
+        // spending scarce Aware slots on phones Bluetooth already reaches makes crowds clump into
+        // islands. Which radio should carry which link in a crowd is open; see
+        // docs/proposals/local-mesh-v4-topology.md.
+        val current = hub.linkTo(remote)
+        if (current != null && current != MeshLink.WIFI_NETWORK) return
         val key = meshToken(remote)
         if (outgoing.get() >= MAX_OUTGOING) return
         if (pending.putIfAbsent(key, System.currentTimeMillis() + SETUP_TIMEOUT_MS) != null) return
