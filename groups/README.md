@@ -40,6 +40,7 @@ Where the specification is still open, the crate either leaves the feature out o
 - **Owner scramble** is available whenever the device has a password set; there is no separate opt-in.
 - **Every vote's voters are its list.** Only members on a vote's list may vote on it, including in groups of 6 or more where removal needs a fixed 3 votes.
 - **Every vote must carry a list.** It always names at least the person who started the vote, so it is never empty.
+- **A vote always counts at least half of all current members** (user, 26 November 2026), leaving out the person it is about, even if its list names fewer (`counted`). This stops one member listing only themselves to take over the group.
 - **A group holds at most 128 members** (user, 26 November 2026), so a vote's list can always name everyone active.
 
 ## Known weakness (accepted)

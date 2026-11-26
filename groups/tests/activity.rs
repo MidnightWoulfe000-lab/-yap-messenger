@@ -287,3 +287,37 @@ fn two_superadmins_elected_apart_face_a_runoff() {
     assert_eq!(state.super_admin, Some(d.key()));
     assert!(state.open_election().is_none());
 }
+
+#[test]
+fn one_member_cannot_take_over_by_listing_only_themselves() {
+    // Five members with A as SuperAdmin. B claims nobody else is active.
+    // Every vote counts at least half of the others, so B alone is not
+    // enough to remove A (found by the Codex review, 26 November 2026).
+    let (log, p) = normal_five();
+    let (a, b, c) = (&p[0], &p[1], &p[2]);
+    let mut log = log;
+    let r = log
+        .append(
+            b,
+            Body::ProposeRevoke {
+                target: a.key(),
+                electorate: keys(&[b]),
+            },
+        )
+        .unwrap();
+    assert!(log.state().unwrap().is_active(&a.key()), "B alone");
+    assert_eq!(log.state().unwrap().revocations[&r].threshold, 2);
+
+    // A second listed member is needed, and C is not on B's list.
+    let c_vote = log.append(c, Body::VoteRevoke { proposal: r }).unwrap();
+    assert_eq!(log.is_valid(&c_vote), Some(false));
+    assert!(log.state().unwrap().is_active(&a.key()));
+}
+
+#[test]
+fn half_the_members_are_always_counted() {
+    assert_eq!(counted(1, 4), 2);
+    assert_eq!(counted(3, 4), 3);
+    assert_eq!(counted(2, 9), 5);
+    assert_eq!(counted(0, 0), 0);
+}

@@ -28,7 +28,7 @@ pub use keys::{DeviceKey, Identity, MemberKey};
 pub use password::{Check, PasswordGuard};
 pub use scramble::{Decision, Rejection, Scope, ScrambleCommand, ScrambleGuard, Trigger};
 pub use state::{
-    majority, revocation_threshold, super_admin_removal_threshold, EarlierTerm, Election,
+    counted, majority, revocation_threshold, super_admin_removal_threshold, EarlierTerm, Election,
     GroupState, JoinProposal, JoinRecord, Log, Member, MemberStatus, Objection, Revocation,
     SettingsVote, Warning,
 };

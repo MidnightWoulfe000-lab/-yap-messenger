@@ -1,5 +1,7 @@
 # Proposal: group encryption
 
+**Status: blocked by review findings; do not implement.** A Codex design review on 26 November 2026 found problems that must be fixed first: see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md).
+
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
 choices in section 2. Section 5 records a review of the open
@@ -111,7 +113,8 @@ All eleven choices are decided (26 November 2026). Choice 11 came out of the rev
     started. **Decided (proposed by Claude, accepted by user, 26 November
     2026): yes.** An open vote is the group's current business,
     not its history, and the newcomer is a member now. The alternative hides the
-    voters behind hashes, which makes the checkpoint harder to check.
+    voters behind hashes. (Since the Codex review, newcomers receive the full
+    governance log anyway, so they see open votes as every member does.)
 
 ## 3. Design for review
 
@@ -178,37 +181,19 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
    clear.
 4. **Admission** follows the built rules (`Admit`, or `AdminAdd` in a normal
    group).
-5. **Starting state for the newcomer.** The newcomer must know the group's
-   current state to check later events, but the spec says they must not see the
-   join history from before they arrived (§4). The design:
-   - **Every governance event carries a state hash:** the SHA-256 of the
-     canonical *checkpoint* (below) of the group state in that event's own view.
-     Every member checks it like any other rule; an event with a wrong state
-     hash is invalid.
-   - **The checkpoint** holds what the rules need and no more: current members
-     with their devices and bundles, admins, the SuperAdmin, settings, and open
-     business (pending join proposals, open votes and elections with who has
-     voted, choice 11). Members who were removed appear only as the hash of
-     their member key, with their device lists, so the rules for coming back
-     still work. A newcomer can tell that someone they already know was removed
-     before, but cannot list who was. Left out: who sponsored earlier members,
-     earlier memberships, closed votes, reasons, and failed join attempts.
-   - **On admission** the sponsor sends the newcomer, over their session, the
-     checkpoint matching the admitting event's state hash. The newcomer checks
-     it and starts from it. A sponsor who lies makes the admission invalid for
-     every other member, so no one hands the newcomer any keys and the
-     newcomer's phone can see that it never got in.
-   - **Events the newcomer cannot check.** An event from a branch of a split
-     that ran alongside the admission cites parents the newcomer never had. The
-     newcomer's phone holds such events and does not act on them. When a later
-     event joins both branches, the newcomer asks a member for the checkpoint
-     at that event, checks it against that event's state hash, and continues
-     from it.
-   - **Confirmation.** A state hash is signed only by the event's author. The
-     newcomer treats a checkpoint as provisional until an event from a second
-     member, made after it, has a state hash that matches the newcomer's own
-     working. If one ever fails to match, the app warns the newcomer and asks
-     another member for the checkpoint.
+5. **Starting state for the newcomer.** Decided after the Codex review (user,
+   26 November 2026): the sponsor sends the newcomer, over their session, the
+   **full governance log** from the group's first event. The newcomer's phone
+   checks every event with the same rules as every other member, so it relies on
+   signatures and rules, not on anyone's summary. It never receives earlier chat,
+   which stays unreadable because of sender keys. The app shows the newcomer only
+   history from their own join onwards; this is enforced by the app, not by
+   encryption, so a modified app could show the earlier governance history.
+
+   **Trust still starts with the sponsor.** A newcomer who knows no other member
+   cannot tell a real group from one the sponsor made up with invented members.
+   The app should say who introduced them, and mark members the newcomer has
+   also verified in person.
 6. **Keys.** When a member's phone processes the admission, it opens a session
    with the newcomer from the newcomer's bundle and hands over its current
    sending key. The newcomer does the same towards every member. Received keys
@@ -441,10 +426,8 @@ it: **not an independent review**.
 1. **No one-time pre-keys.** *Resolved:* replay of a first message is refused
    by libsignal's record of used base keys, confirmed by measurement. Yap must
    store that record permanently and replace bundles monthly (3.2).
-2. **Checkpoints and concurrent branches.** *Proposed:* state hashes on every
-   event, held events, later checkpoints, and confirmation by a second member
-   (3.3, step 5). This changes the event format in `groups/`. It needs a
-   canonical state encoding and split tests before it is relied on.
+2. **Checkpoints and concurrent branches.** *Replaced after the Codex review:*
+   newcomers receive the full governance log instead (3.3, step 5).
 3. **Knowing a hand-over arrived.** *Proposed:* the recipient sends a small
    encrypted acknowledgement over their session, as one-to-one receipts work.
    The sender resends unacknowledged pieces, batched, on the mesh's retry
@@ -460,8 +443,6 @@ it: **not an independent review**.
    - Group message header, inside the encryption: `YGM1`, group ID (16), sender
      member key (32), message ID (16), distribution ID (16), log heads (count of
      at most `MAX_PARENTS`, then 32 each), kind (1), payload.
-   - Checkpoint: `YGS1` then each part in sorted order. State hash =
-     SHA-256 of the tag `Yap group state v1` followed by the checkpoint.
 
    Exact limits and test vectors come with the code review.
 5. **Storage.** *Proposed:* the endpoint's encrypted snapshot and staged commits
@@ -496,7 +477,6 @@ planned future feature; version 1 is one device per member.
 - After a removal, the removed member cannot decrypt anything sent with the new
   keys, including governance events.
 - A newcomer cannot decrypt messages sent before their admission.
-- A false checkpoint in an admission makes it invalid for every other member.
 - A split where each side removes someone: on reconnecting, every phone ends
   with keys that exclude both removed people, after one change per phone.
 - Duplicate, reordered, tampered and replayed messages, and messages carrying a
@@ -507,10 +487,8 @@ planned future feature; version 1 is one device per member.
   survives).
 - A removal in a group of 128 produces 127 envelopes, each under the envelope
   limit, and fits the relay limits.
-- A newcomer holds events from a concurrent branch, then continues from a later
-  checkpoint. A false state hash is caught when a second member's event does
-  not match.
-- A checkpoint names no removed member in readable form.
+- A newcomer who receives the full governance log reaches the same state as
+  existing members, including after splits.
 - A message skipping more than 2,000 chain steps is dropped before decryption.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
@@ -520,7 +498,8 @@ planned future feature; version 1 is one device per member.
 
 1. Record the answers to section 2 in GROUP_MECHANICS.md.
 2. Settle the open points in section 5, with review.
-3. Add bundle publication, the checkpoint hash and the new events to `groups/`,
+3. Add bundle publication, sending the full governance log to newcomers, and
+   the new events to `groups/`,
    with tests.
 4. Build the encryption layer in a separate crate on the sender-key functions,
    with the tests in section 6 run on simulated phones.

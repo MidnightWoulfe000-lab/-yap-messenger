@@ -118,7 +118,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - Whether “join time” means device time, verified logical order or a consensus event.
 - What a member sees about pre-existing participants at join time (current roster vs earlier invitation chain).
 - Whether past messages and historical governance events are accessible to newcomers.
-- How the history restriction is enforced cryptographically, rather than merely hidden by the interface.
+- ~~How the history restriction is enforced cryptographically, rather than merely hidden by the interface.~~ **Decided (proposed by Claude after the Codex review, accepted by user, 26 November 2026):** a newcomer's phone receives the **full governance log** (joins, votes, removals), so it can check every event itself, but **never earlier chat**, which stays unreadable because of sender keys. The app shows the newcomer only history from their own join onwards. This is enforced by the app, not by encryption: a modified app could show the earlier governance history.
 
 ## 5. Multiple devices and revocation
 
@@ -138,6 +138,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
   - **Updated (user, 26 November 2026): every majority vote counts only members active in the last 30 days** (measured as in §3). This applies to removal votes in groups of up to 5, overriding a rejection, removing or electing a SuperAdmin, and switching a collective back to a normal group. Members who have not been active are left out of the count. The fixed threshold of 3 approvals in groups of 6 or more is unchanged.
   - Built in `groups/`: each vote carries the list of members its proposer's phone saw as active, majorities count from that list, and only members on it can vote (accepted by user, 26 November 2026). Every vote must carry a list, naming at least whoever started it. If a phone's own records disagree with the list, **the vote's list wins** (user, 26 November 2026); the phone can show a warning but counts from the list.
+  - **A vote always counts at least half of all current members** (proposed by Claude after the Codex review, accepted by user, 26 November 2026), leaving out the person the vote is about, even if its list names fewer. Inactive members can still be left out, but never more than half. Without this, one member could list only themselves, remove the SuperAdmin alone and vote themselves in; the Codex review found this and a test confirmed it.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
   - **They can come back on their old devices** (user, 26 November 2026); they only need a new invite. A device they revoked themselves, for example because it was lost, stays revoked (proposed by Claude, accepted by user, 26 November 2026).

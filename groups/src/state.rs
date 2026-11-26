@@ -50,6 +50,14 @@ pub fn majority(n: usize) -> usize {
 
 /// Votes needed to remove the SuperAdmin: a majority of everyone else, in any
 /// size of group, even with group revoking off (§3).
+/// How many members a majority vote counts: its list, but never fewer than
+/// half of everyone who could have been on it (user, 26 November 2026).
+/// `listed` and `everyone` both leave out the person the vote is about. This
+/// stops one member naming only themselves and passing a vote alone.
+pub fn counted(listed: usize, everyone: usize) -> usize {
+    listed.max(everyone.div_ceil(2))
+}
+
 pub fn super_admin_removal_threshold(group_size: usize) -> usize {
     majority(group_size.saturating_sub(1))
 }
@@ -148,13 +156,17 @@ pub struct Election {
     pub winner: Option<MemberKey>,
     /// Superseded by a runoff.
     pub closed: bool,
+    /// Active members when the seat became empty; the count never drops below
+    /// half of them (see [`counted`]).
+    pub members_at: usize,
 }
 
 impl Election {
-    fn new(vacancy: Hash, electorate: Vec<MemberKey>) -> Self {
+    fn new(vacancy: Hash, electorate: Vec<MemberKey>, members_at: usize) -> Self {
         Self {
             vacancy,
             electorate,
+            members_at,
             candidates: None,
             votes: BTreeMap::new(),
             winner: None,
@@ -164,6 +176,11 @@ impl Election {
 
     pub fn is_open(&self) -> bool {
         self.winner.is_none() && !self.closed
+    }
+
+    /// Votes one candidate needs to win.
+    pub fn threshold(&self) -> usize {
+        majority(counted(self.electorate.len(), self.members_at))
     }
 }
 
@@ -245,7 +262,7 @@ impl GroupState {
             .filter(|m| **m != rejection.objector)
             .count();
         if rejection.members_at <= SMALL_GROUP_MAX {
-            majority(others)
+            majority(counted(others, rejection.members_at.saturating_sub(1)))
         } else {
             LARGE_GROUP_REVOKE_APPROVALS
         }
@@ -947,7 +964,7 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
                 SettingsVote {
                     settings: *settings,
                     electorate: stored.electorate.clone(),
-                    threshold: majority(stored.electorate.len()),
+                    threshold: majority(counted(stored.electorate.len(), stored.active_before)),
                     supporters: BTreeSet::from([author]),
                     carried: false,
                 },
@@ -969,7 +986,7 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
             // members and 3 votes from 6.
             let threshold =
                 if state.super_admin == Some(*target) || stored.active_before <= SMALL_GROUP_MAX {
-                    majority(others)
+                    majority(counted(others, stored.active_before.saturating_sub(1)))
                 } else {
                     LARGE_GROUP_REVOKE_APPROVALS
                 };
@@ -1019,11 +1036,12 @@ fn vote_super_admin(
     };
     e.votes.insert(voter, candidate);
     let votes = e.votes.values().filter(|c| **c == candidate).count();
-    if votes < majority(e.electorate.len()) {
+    if votes < e.threshold() {
         return;
     }
     e.winner = Some(candidate);
     let electorate = e.electorate.clone();
+    let e_members_at = e.members_at;
     if !state.is_active(&candidate) {
         return;
     }
@@ -1037,9 +1055,11 @@ fn vote_super_admin(
         // seen the other, so there is a new vote between just those two (§3).
         Some(current) => {
             let mut both: BTreeSet<MemberKey> = electorate.into_iter().collect();
+            let mut members_at = e_members_at;
             for other in state.elections.values() {
                 if other.winner == Some(current) {
                     both.extend(other.electorate.iter().copied());
+                    members_at = members_at.max(other.members_at);
                 }
             }
             for e in state.elections.values_mut() {
@@ -1048,6 +1068,7 @@ fn vote_super_admin(
             let mut runoff = Election::new(
                 hash,
                 both.into_iter().filter(|m| state.is_active(m)).collect(),
+                members_at,
             );
             runoff.candidates = Some(BTreeSet::from([current, candidate]));
             state.elections.insert(hash, runoff);
@@ -1098,7 +1119,9 @@ fn remove_member(state: &mut GroupState, target: MemberKey, by: Hash, electorate
         // election. If both sides elect someone, a runoff follows.
         if let MemberStatus::Revoked { revocation } = m.status {
             if state.elections.contains_key(&revocation) && !state.elections.contains_key(&by) {
-                state.elections.insert(by, Election::new(by, electorate));
+                state
+                    .elections
+                    .insert(by, Election::new(by, electorate, state.active_count()));
             }
         }
         return;
@@ -1114,7 +1137,9 @@ fn remove_member(state: &mut GroupState, target: MemberKey, by: Hash, electorate
     if state.super_admin == Some(target) {
         state.super_admin = None;
         state.admins.clear();
-        state.elections.insert(by, Election::new(by, electorate));
+        state
+            .elections
+            .insert(by, Election::new(by, electorate, state.active_count()));
     }
 }
 
@@ -1138,7 +1163,9 @@ fn change_settings(
             }
         }
         (GroupType::Collective, GroupType::Normal) => {
-            state.elections.insert(by, Election::new(by, electorate));
+            state
+                .elections
+                .insert(by, Election::new(by, electorate, state.active_count()));
         }
         _ => {}
     }
