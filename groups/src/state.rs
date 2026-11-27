@@ -58,6 +58,13 @@ pub fn counted(listed: usize, everyone: usize) -> usize {
     listed.max(everyone.div_ceil(2))
 }
 
+/// Votes a majority vote needs: a majority of [`counted`], and never fewer
+/// than 2 when at least 2 people could vote (user, 27 November 2026), so no
+/// one carries a vote alone in a group of 3 or more.
+pub fn needed(listed: usize, everyone: usize) -> usize {
+    majority(counted(listed, everyone)).max(everyone.min(2))
+}
+
 pub fn super_admin_removal_threshold(group_size: usize) -> usize {
     majority(group_size.saturating_sub(1))
 }
@@ -180,7 +187,7 @@ impl Election {
 
     /// Votes one candidate needs to win.
     pub fn threshold(&self) -> usize {
-        majority(counted(self.electorate.len(), self.members_at))
+        needed(self.electorate.len(), self.members_at)
     }
 }
 
@@ -262,7 +269,7 @@ impl GroupState {
             .filter(|m| **m != rejection.objector)
             .count();
         if rejection.members_at <= SMALL_GROUP_MAX {
-            majority(counted(others, rejection.members_at.saturating_sub(1)))
+            needed(others, rejection.members_at.saturating_sub(1))
         } else {
             LARGE_GROUP_REVOKE_APPROVALS
         }
@@ -964,7 +971,7 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
                 SettingsVote {
                     settings: *settings,
                     electorate: stored.electorate.clone(),
-                    threshold: majority(counted(stored.electorate.len(), stored.active_before)),
+                    threshold: needed(stored.electorate.len(), stored.active_before),
                     supporters: BTreeSet::from([author]),
                     carried: false,
                 },
@@ -984,12 +991,16 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
             let others = stored.electorate.iter().filter(|m| *m != target).count();
             // The SuperAdmin always needs a majority; others need one up to 5
             // members and 3 votes from 6.
-            let threshold =
-                if state.super_admin == Some(*target) || stored.active_before <= SMALL_GROUP_MAX {
-                    majority(counted(others, stored.active_before.saturating_sub(1)))
-                } else {
-                    LARGE_GROUP_REVOKE_APPROVALS
-                };
+            let everyone = stored.active_before.saturating_sub(1);
+            // Removing the SuperAdmin always needs 2 votes, so in a group of
+            // 2 nobody can remove them (user, 27 November 2026).
+            let threshold = if state.super_admin == Some(*target) {
+                needed(others, everyone).max(2)
+            } else if stored.active_before <= SMALL_GROUP_MAX {
+                needed(others, everyone)
+            } else {
+                LARGE_GROUP_REVOKE_APPROVALS
+            };
             state.revocations.insert(
                 hash,
                 Revocation {

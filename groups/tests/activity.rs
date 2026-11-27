@@ -321,3 +321,96 @@ fn half_the_members_are_always_counted() {
     assert_eq!(counted(2, 9), 5);
     assert_eq!(counted(0, 0), 0);
 }
+
+/// A normal group of three, added directly by the SuperAdmin A.
+fn normal_three() -> (Log, Vec<Identity>) {
+    let (mut log, a, b) = normal_group(false);
+    let request = JoinRequest::sign(&id(3), log.group());
+    log.append(&a, Body::AdminAdd { request }).unwrap();
+    (log, vec![a, b, id(3)])
+}
+
+fn propose_removal(log: &mut Log, by: &Identity, target: &Identity, list: &[&Identity]) -> Hash {
+    log.append(
+        by,
+        Body::ProposeRevoke {
+            target: target.key(),
+            electorate: keys(list),
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn no_one_takes_over_a_group_of_three_alone() {
+    // Found by the second Codex review (27 November 2026): with only the
+    // half-of-members floor, B could remove A here by listing only B.
+    let (mut log, p) = normal_three();
+    let (a, b, c) = (&p[0], &p[1], &p[2]);
+    let alone = propose_removal(&mut log, b, a, &[b]);
+    assert!(log.state().unwrap().is_active(&a.key()));
+    assert_eq!(log.state().unwrap().revocations[&alone].threshold, 2);
+
+    // With C on the list and voting, A is removed, and the election also
+    // needs both.
+    let r = propose_removal(&mut log, b, a, &[b, c]);
+    log.append(c, Body::VoteRevoke { proposal: r }).unwrap();
+    let state = log.state().unwrap();
+    assert!(!state.is_active(&a.key()));
+    let vacancy = state.open_election().unwrap().vacancy;
+    log.append(
+        b,
+        Body::ElectSuperAdmin {
+            vacancy,
+            candidate: b.key(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        log.state().unwrap().super_admin,
+        None,
+        "B's own vote is not enough"
+    );
+    log.append(
+        c,
+        Body::ElectSuperAdmin {
+            vacancy,
+            candidate: b.key(),
+        },
+    )
+    .unwrap();
+    assert_eq!(log.state().unwrap().super_admin, Some(b.key()));
+}
+
+#[test]
+fn nobody_can_remove_the_superadmin_of_a_group_of_two() {
+    let (mut log, a, b) = normal_group(false);
+    let r = propose_removal(&mut log, &b, &a, &[&b]);
+    let state = log.state().unwrap();
+    assert!(state.is_active(&a.key()));
+    assert_eq!(state.revocations[&r].threshold, 2);
+}
+
+#[test]
+fn no_member_of_a_collective_of_three_removes_another_alone() {
+    let (mut log, p) = group_of(3, true, true);
+    propose_removal(&mut log, &p[0], &p[1], &[&p[0]]);
+    assert!(log.state().unwrap().is_active(&p[1].key()));
+}
+
+#[test]
+fn votes_needed_across_sizes() {
+    // (listed, everyone) -> votes needed
+    for (listed, everyone, want) in [
+        (0, 0, 1), // nobody could vote, so it can never pass
+        (1, 1, 1),
+        (1, 2, 2),
+        (2, 2, 2),
+        (1, 3, 2),
+        (3, 4, 2),
+        (2, 9, 3),
+        (9, 9, 5),
+    ] {
+        assert_eq!(needed(listed, everyone), want, "{listed} of {everyone}");
+    }
+}

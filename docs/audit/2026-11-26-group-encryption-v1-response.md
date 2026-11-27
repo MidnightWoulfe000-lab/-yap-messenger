@@ -68,3 +68,19 @@ Finding numbers are Codex's.
   vote opens. This needs everyone to be reachable, which a split mesh often is
   not.
 - *Option 3:* drop the 30-day rule and count all current members again.
+
+## Second review (27 November 2026)
+
+Answers [the second Codex review](2026-11-27-group-encryption-v1-response-review.md).
+Its numbers are used here. All six findings are accepted.
+
+| # | Status | What changes |
+| --- | --- | --- |
+| 1 | Accepted, fixed | Decision (user, 27 November 2026): a vote always needs at least 2 votes when 2 or more people could vote, and in a group of 2 nobody can remove the SuperAdmin. Built in `groups/` (`needed`), with tests for groups of 2 and 3 and a table of list lengths and group sizes. |
+| 2 | Accepted; proposal revised | §3.6: recovery has its own limit (one per sender per hour) and never uses up the weekly change; the weekly change is limited separately. |
+| 3 | Accepted; proposal revised | §3.4 now specifies the outer layer: XChaCha20-Poly1305 with random 24-byte nonces, the HKDF key schedule with both directions of a pair separated, associated data from `Header::binding()`, the format and retries. Pieces are bound to their own label so they can move between batches. §1 no longer says nothing new is invented. Test vectors are still needed before approval. |
+| 4 | Accepted; proposal revised | §3.10: deadlines at each step (offer, founding event, first keys). A missed deadline abandons the attempt, and a fresh one needs fresh consent. |
+| 5 | Accepted; decision changed | Decision (user, 27 November 2026): internet access is not checked. What counts is being cut off from the main group, whatever the reason. Heartbeats go every 6 hours, leaving margin against the 24-hour rule. The proposal no longer claims the trigger proves nobody has internet. |
+| 6 | Accepted; proposal revised | §5: hand-over pieces carry the recipient, a generation number, the kind of change and the governance events answered; acknowledgements name the generation. Each event justifies one change per sender, and an older generation never replaces a newer one. |
+
+The changes are again Claude's own and need review before implementation.

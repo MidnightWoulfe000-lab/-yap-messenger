@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -20,9 +20,11 @@ read them.
 
 ## 1. The short version
 
-- **No new encryption is invented.** Yap already uses Signal's library
+- **Built on Signal's library, with one new layer.** Yap already uses Signal's library
   (libsignal) for one-to-one chats. The same library has Signal's group method,
-  called *sender keys*, and this proposal uses it unchanged.
+  called *sender keys*, and this proposal uses it unchanged. The one new piece is an outer layer of
+  encryption around each message (3.4), built from standard parts; it needs its
+  own review.
 - **Each member has their own sending key.** When you send to the group, your
   phone locks the message once with your sending key. Every member who holds a
   copy of your sending key can unlock it. Phones that only carry the message
@@ -95,11 +97,13 @@ All eleven choices are decided (26 November 2026). Choice 11 came out of the rev
 
 9. **What does "nearby" mean?**
    **Decided (user, 26 November 2026): reachable through the local mesh right
-   now**, not only in direct radio range. A temporary group **only forms if
-   nobody in the local mesh has internet access**. This needs no separate check:
-   if one phone reaches an internet relay, messages from the rest of the group
-   come through it, so the phones in the mesh keep hearing from members and are
-   not cut off (choice 7).
+   now**, not only in direct radio range. **Revised (user, 27 November 2026):**
+   what matters is being cut off from the main group, whatever the reason.
+   Having internet does not mean being connected to the group: no relay or Tor
+   may be set up, or relay messaging may be switched off. And if the rest of the
+   group is offline, a phone and its neighbours are cut off from it either way.
+   So whether phones have internet is not checked; the trigger is not hearing
+   from the main group (choice 7).
 
 10. **What if two temporary groups from the same original group come into reach
     of each other?**
@@ -123,7 +127,8 @@ All eleven choices are decided (26 November 2026). Choice 11 came out of the rev
 ### 3.1 Building blocks
 
 All from libsignal at the revision already pinned for `endpoint/` and `groups/`
-(`257105c`). No primitive or key schedule is written by hand.
+(`257105c`). No primitive is written by hand. The only key derivation Yap adds
+is the outer layer's (3.4), which uses standard HKDF and needs its own review.
 
 - **One-to-one sessions** (PQXDH set-up, then the Double Ratchet with SPQR), as
   used by the paired endpoint. Here they carry sending keys and private group
@@ -228,18 +233,36 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   [rotating address labels](rotating-address-labels.md) proposal. A receiver
   works out the current label for each member: at most 127 cheap calculations
   an hour.
-- **Outer layer** (Codex finding 5). Libsignal leaves some fields readable:
-  a group message shows its distribution ID, chain ID and step number, a
-  one-to-one message its ratchet key, and a session set-up message the sender's
-  identity key. Any relay could follow those across label changes. So the whole
-  libsignal message is encrypted once more before it goes in the envelope, with
-  a standard authenticated cipher (ChaCha20-Poly1305 or AES-256-GCM, from a
-  maintained library) under a key derived with HKDF-SHA256 from the label key
-  and the hour. The label and the envelope header are bound in as associated
-  data. A relay then sees only the label and ciphertext. One-to-one pieces use
-  the label key the pair share (3.9) in the same way. This layer is new and
-  **needs its own review before it is relied on**; until then, the privacy
-  claims in section 4 hold only without it.
+- **Outer layer** (Codex finding 5, specified after the second review).
+  Libsignal leaves some fields readable: a group message shows its distribution
+  ID, chain ID and step number, a one-to-one message its ratchet key, and a
+  session set-up message the sender's identity key. Any relay could follow
+  those across label changes, so the whole libsignal message is encrypted once
+  more before it goes in the envelope:
+  - **Cipher:** XChaCha20-Poly1305 from the maintained RustCrypto
+    `chacha20poly1305` crate, pinned like libsignal. Its 24-byte nonces are
+    **chosen at random** for every message, so there is no counter to store or
+    restore after a crash, and many senders can share a key safely. (RFC 8439
+    requires a nonce never to repeat under one key; at 24 random bytes a repeat
+    is negligible.)
+  - **Key:** HKDF-SHA256 with the label key as input, the salt
+    `Yap outer layer v1`, and as info: the kind (1 byte: group or pair), the
+    group ID (16), the sender's member key (32), the recipient's member key (32,
+    zeros for group messages) and the hour number (8, big-endian). Naming sender
+    and recipient separates the two directions of a pair, so the two phones
+    never use the same key.
+  - **Associated data:** for an envelope, the label and the envelope's
+    immutable header bytes from `Header::binding()` in `core/src/envelope.rs`,
+    which already leave out the hop count relays change. For a hand-over piece
+    (3.9), the piece's own label and tag only, so a piece can move to a new
+    batch unchanged.
+  - **Format:** `YGO1`, nonce (24), ciphertext with its 16-byte tag.
+  - **Retries** resend the stored bytes; nothing is encrypted twice. A receiver
+    tries the current and the previous hour's key.
+
+  This layer is new and **needs its own review, with test vectors, before it is
+  relied on**; until then, the privacy claims in section 4 hold only without
+  it.
 
 ### 3.5 Governance events travel encrypted
 
@@ -256,7 +279,9 @@ A change of keys is either:
   SuperAdmin) or a member marking one of their own devices as lost
   (`RevokeOwnDevice`). The hand-over names the governance events it answers, so
   receivers can check the reason; or
-- **routine:** the weekly change (choice 5), or a resynchronisation (below).
+- **weekly:** the routine change (choice 5); or
+- **recovery:** a fresh generation for receivers that fell too far behind
+  (below).
 
 When a phone processes a removal, it makes a new sending key under a new random
 distribution ID and hands it over, with a new label key, to every member active
@@ -264,14 +289,23 @@ in its state. It never sends it to the removed member. From then on it sends
 only with the new key. Several removals processed together produce **one**
 change, not one each.
 
-**Limits** (Codex finding 10). Justified changes are never refused, because
-refusing one could keep a removed member in. They are merged and scheduled
-instead. Routine changes are limited to 2 per member per day; more are
-ignored and the app warns.
+**Limits** (Codex finding 10, revised after the second review). Justified
+changes are never refused, because refusing one could keep a removed member
+in. They are merged and scheduled instead. Each governance event can justify one
+change per sender: naming an event that sender already answered does not count.
+The other kinds have **separate** limits, so one cannot use up another's:
+- weekly: at most one per sender in any 6 days;
+- recovery: at most one per sender per hour, however many receivers ask, and
+  never counted against the weekly limit.
+
+Anything beyond these is ignored and the app warns. At worst a hostile member
+can force 24 recovery changes a day, each one envelope or a few.
 
 **Keeping old keys.** Old sending keys, its own and others', are kept for 24
 hours, so slow messages can still be read, with at most 8 generations per
-member. If a member goes past 8 within a day, the oldest is deleted early and
+member. A generation only becomes a member's current one if its number is
+higher than the current one; a delayed older generation is kept for reading
+only. If a member goes past 8 within a day, the oldest is deleted early and
 messages still in flight under it are lost. That loss is accepted and shown.
 
 **Erasure** (Codex finding 12). Deleting a generation deletes its chain key, the
@@ -287,7 +321,7 @@ a chain the receiver already has keeps the receiver's old position. A receiver
 that cannot decrypt because it is more than 2,000 steps behind, or has no key
 for that generation, asks the sender over their one-to-one session. The sender
 answers with a **fresh generation** for everyone, at most once an hour however
-many ask; it counts as routine. Messages in the gap stay lost for that
+many ask; it counts as recovery, not as the weekly change. Messages in the gap stay lost for that
 receiver. This needs a test against the pinned library before it is relied on.
 
 **Copied phones** (Codex finding 11). A new sending key does not shut out
@@ -409,9 +443,9 @@ This section proposes the mechanics.
   group's active members for 24 hours (choice 7);
 - at least one other active member is reachable through the local mesh right
   now, making at least 2 (choice 9);
-- the cut-off rule already covers internet access: hearing from members counts
-  whatever the route, so a phone in the mesh with an internet relay connection
-  keeps everyone in touch and nothing forms (choice 9).
+- whether any phone has internet is not checked: being cut off from the main
+  group is what counts, whatever the reason (choice 9, revised 27 November
+  2026).
 
 **One group per cut-off part.** Every phone in the part would otherwise make its
 own. The phones in reach of each other agree on one to do the paperwork: the one
@@ -478,16 +512,26 @@ elsewhere, and never call the temporary group safe.
   closeness, and a relay that tunnels traffic between meshes can still make two
   places look like one. Strangers see only ordinary labelled envelopes; the
   group's ID never goes over the air.
-- **Hearing from members** (finding 15). For "not heard from in 24 hours" to
-  mean something in a quiet group, every member's phone sends a small encrypted
-  heartbeat once a day. Being cut off is still a judgement, never certain, and
-  the app says so.
-- **Two phones both doing the paperwork** (finding 16). The phone with the
-  smallest member key does the paperwork, but only for 2 minutes: if no offer
-  has come from it by then, the next smallest takes over. Once anyone has
-  accepted an offer, that formation is never replaced because a smaller key
-  turns up. Two formations that have both started are two temporary groups
-  meeting, and the merge offer applies.
+- **Hearing from members** (finding 15, revised after the second review). For
+  "not heard from in 24 hours" to mean something in a quiet group, every
+  member's phone sends a small encrypted heartbeat every 6 hours, which leaves
+  room for delays and missed ones. Being cut off is still a judgement, never
+  certain, and the app says so; it does not claim that nobody has internet.
+- **Two phones both doing the paperwork** (finding 16, revised after the
+  second review). The phone with the smallest member key does the paperwork,
+  with a deadline at every step:
+  1. the offer goes out within 2 minutes;
+  2. the first two acceptances are followed within 2 minutes by the founding
+     event, signed by those two;
+  3. everyone who has accepted has the first sending keys within 5 minutes of
+     their acceptance.
+
+  If any step is missed, the attempt is abandoned and any phone that accepted
+  may start a fresh one. A fresh attempt always needs fresh consent, because
+  each acceptance is bound to one offer. While an attempt is keeping to its
+  deadlines, it is never replaced because a smaller key turns up. Two attempts
+  that have both formed are two temporary groups meeting, and the merge offer
+  applies.
 - **Binding consent** (finding 16). An acceptance names the exact temporary
   group ID, the original group, the member's current membership in it (the
   event that admitted them, which changes if they left and rejoined), the
@@ -548,8 +592,13 @@ it: **not an independent review**.
 4. **Encodings.** *Proposed layouts.* Every field has a fixed size or a length
    limit, and each kind starts with its own tag. A hash covers a tag naming its
    purpose as well as the bytes.
-   - Hand-over piece: `YGH1`, group ID (16), distribution ID (16), label key
+   - Hand-over piece (revised after the second review): `YGH1`, group ID (16),
+     recipient's member key (32), generation number (4), kind (1: justified,
+     weekly or recovery), the governance events it answers (count of at most
+     16, then 32 each; none unless justified), distribution ID (16), label key
      (32), the distribution message (length-prefixed, at most 256 bytes).
+   - Acknowledgement: `YGA1`, group ID (16), the hand-over sender's member key
+     (32), generation number (4).
    - Group message header, inside the encryption: `YGM1`, group ID (16), sender
      member key (32), message ID (16), distribution ID (16), log heads (count of
      at most `MAX_PARENTS`, then 32 each), kind (1), payload.
@@ -617,6 +666,15 @@ planned future feature; version 1 is one device per member.
   - an old message delivered late does not make its author count as in reach;
   - a paperwork phone that stays silent is replaced after 2 minutes, and an
     accepted formation is never displaced.
+- After the second Codex review:
+  - outer-layer test vectors, including both directions of a pair and a piece
+    moved to a new batch;
+  - more than two recoveries in one day, alongside a weekly change, with
+    requests from different receivers at different times;
+  - reordered hand-overs, mismatched acknowledgements, and one governance event
+    named twice;
+  - a paperwork phone that sends its offer and then disappears, at each of the
+    three steps.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.
