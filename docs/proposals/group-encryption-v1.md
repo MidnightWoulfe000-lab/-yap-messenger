@@ -246,7 +246,8 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     requires a nonce never to repeat under one key; at 24 random bytes a repeat
     is negligible.)
   - **Key:** HKDF-SHA256 with the label key as input, the salt
-    `Yap outer layer v1`, and as info: the kind (1 byte: group or pair), the
+    `Yap outer layer v1`, and as info: the kind (1 byte: `0x01` for a group
+    message, `0x02` for a one-to-one piece), the
     group ID (16), the sender's member key (32), the recipient's member key (32,
     zeros for group messages) and the hour number (8, big-endian). Naming sender
     and recipient separates the two directions of a pair, so the two phones
@@ -260,11 +261,11 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     A receiver derives the one key for that hour, and accepts hours from
     25 hours ago to 1 hour ahead, the same window as address labels: 24 hours
     of envelope lifetime plus room for clock differences.
-  - **Associated data:** for an envelope, the label and the envelope's
-    immutable header bytes from `Header::binding()` in `core/src/envelope.rs`,
-    which already leave out the hop count relays change. For a hand-over piece
-    (3.9), the piece's own label, hour and tag only, so a piece can move to a
-    new batch unchanged.
+  - **Associated data:** for an envelope, exactly the 68 bytes of
+    `Header::binding()` in `core/src/envelope.rs`. They already include the
+    label (as the destination) and the creation time, and leave out the hop
+    count that relays change. For a hand-over piece (3.9), its label (16) then
+    its hour (8, big-endian), so a piece can move to a new batch unchanged.
   - **Format:** `YGO1`, nonce (24), ciphertext with its 16-byte tag.
   - **Retries** resend the stored bytes unchanged while they are under 20
     hours old. A hand-over piece still waiting after that is **re-wrapped**: the
@@ -273,8 +274,12 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     a fresh random nonce. The receiver ignores a repeat of a generation it
     already has, so a re-wrapped copy is harmless.
 
-  This layer is new and **needs its own review, with test vectors, before it is
-  relied on**; until then, the privacy claims in section 4 hold only without
+  **Test vectors:** [`experiments/outer-layer-vectors/`](../../experiments/outer-layer-vectors/README.md)
+  (27 November 2026) gives fixed inputs and exact outputs for these rules, and
+  checks the two libraries against their published test examples. Its code is
+  a reference for the vectors only, not the app's implementation.
+
+  This layer is new and **needs its own review before it is relied on**; until then, the privacy claims in section 4 hold only without
   it.
 
 ### 3.5 Governance events travel encrypted

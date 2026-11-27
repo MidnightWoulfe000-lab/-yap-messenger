@@ -116,3 +116,19 @@ agreed with the project owner for design review rounds. Still outstanding
 before implementation: outer-layer test vectors, the batch custody questions
 left to the mesh design, and an independent expert review before any sensitive
 use.
+
+## Outer-layer test vectors (27 November 2026)
+
+[`experiments/outer-layer-vectors/`](../../experiments/outer-layer-vectors/README.md)
+now provides the test vectors the second and third reviews asked for. It pins
+the remaining byte details in proposal §3.4: kind `0x01` for group messages and
+`0x02` for pieces; an envelope's associated data is exactly the 68 bytes of
+`Header::binding()`, which already holds the label; a piece's is its label then
+its hour. Its tests check the HKDF library against RFC 5869 test case 1 and the
+XChaCha20-Poly1305 library against draft-irtf-cfrg-xchacha-03 appendix A.3.1,
+both passing, and cover tampering, direction separation, hour boundaries and
+the unbound hop count. GitHub's Rust checks now run it.
+
+Still outstanding before implementation: review of the outer layer with these
+vectors, the batch custody questions left to the mesh design, and an
+independent expert review before any sensitive use.

@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        manifest: [core/Cargo.toml, groups/Cargo.toml, relay-server/Cargo.toml, experiments/signal-mesh/Cargo.toml, endpoint/Cargo.toml, native/android/Cargo.toml]
+        manifest: [core/Cargo.toml, groups/Cargo.toml, relay-server/Cargo.toml, experiments/signal-mesh/Cargo.toml, experiments/outer-layer-vectors/Cargo.toml, endpoint/Cargo.toml, native/android/Cargo.toml]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.100.0
