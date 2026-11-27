@@ -84,3 +84,18 @@ Its numbers are used here. All six findings are accepted.
 | 6 | Accepted; proposal revised | §5: hand-over pieces carry the recipient, a generation number, the kind of change and the governance events answered; acknowledgements name the generation. Each event justifies one change per sender, and an older generation never replaces a newer one. |
 
 The changes are again Claude's own and need review before implementation.
+
+## Third review (27 November 2026)
+
+Answers [the third Codex review](2026-11-27-group-encryption-v1-third-review.md),
+which found no critical problems: 1 high and 3 medium. All four are accepted.
+
+| # | Status | What changes |
+| --- | --- | --- |
+| 1 | Accepted; proposal revised | §3.4: the outer key's hour comes from the envelope's own creation time (checked by the cipher) or, for a piece, from an hour field bound into it. Receivers accept 25 hours back to 1 hour ahead, matching address labels and the 24-hour lifetime. Pieces waiting more than 20 hours are re-wrapped: the libsignal message inside is unchanged, only the outer layer is redone with a fresh random nonce. |
+| 2 | Accepted; proposal revised | §5's limit checklist now gives the separate weekly and recovery limits, enforced by receivers, instead of the old "2 per day". |
+| 3 | Accepted, fixed | `revocation_threshold` and `super_admin_removal_threshold` now take the vote's list and the member count and are the calculation the state machine itself uses, so they cannot drift apart. A test checks that a 2-person group's SuperAdmin needs 2 votes in both. |
+| 4 | Accepted; measurement and proposal revised | The program in `experiments/sender-key-sizes/` now encodes the current hand-over with 0, 1 and 16 events and counts the piece's label, hour, outer layer and batch length. §3.9's tables are refreshed from it; a removal with open sessions is now about 6.4 MB, not 4.6 MB. Batch storage stays open. |
+
+Still outstanding before implementation: outer-layer test vectors, the batch
+custody questions left to the mesh design, and review of these changes.

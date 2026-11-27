@@ -389,6 +389,8 @@ fn nobody_can_remove_the_superadmin_of_a_group_of_two() {
     let state = log.state().unwrap();
     assert!(state.is_active(&a.key()));
     assert_eq!(state.revocations[&r].threshold, 2);
+    // The public helper gives the same answer as the state machine.
+    assert_eq!(super_admin_removal_threshold(1, 1), 2);
 }
 
 #[test]

@@ -29,13 +29,13 @@ pub const INDEPENDENT_APPROVAL_FROM: usize = 5;
 /// The target is not counted and cannot vote. Up to 5 members it is a majority
 /// of everyone else (not voting counts as no); from 6 it is 3.
 ///
-/// `group_size` is the number of active members when the vote **starts**.
-/// That choice is provisional: the specification still lists start-or-end as
-/// open.
-pub fn revocation_threshold(group_size: usize) -> usize {
-    let others = group_size.saturating_sub(1);
+/// This is the calculation the state machine uses. `listed` is the vote's
+/// list and `everyone` every active member, both leaving out the target;
+/// `group_size` is the active members, target included, when the vote
+/// **starts** (decided, user, 26 November 2026).
+pub fn revocation_threshold(listed: usize, everyone: usize, group_size: usize) -> usize {
     if group_size <= SMALL_GROUP_MAX {
-        others / 2 + 1
+        needed(listed, everyone)
     } else {
         LARGE_GROUP_REVOKE_APPROVALS
     }
@@ -48,8 +48,6 @@ pub fn majority(n: usize) -> usize {
     n / 2 + 1
 }
 
-/// Votes needed to remove the SuperAdmin: a majority of everyone else, in any
-/// size of group, even with group revoking off (§3).
 /// How many members a majority vote counts: its list, but never fewer than
 /// half of everyone who could have been on it (user, 26 November 2026).
 /// `listed` and `everyone` both leave out the person the vote is about. This
@@ -65,8 +63,13 @@ pub fn needed(listed: usize, everyone: usize) -> usize {
     majority(counted(listed, everyone)).max(everyone.min(2))
 }
 
-pub fn super_admin_removal_threshold(group_size: usize) -> usize {
-    majority(group_size.saturating_sub(1))
+/// Votes needed to remove the SuperAdmin, in any size of group, even with
+/// group revoking off (§3): [`needed`], and always at least 2, so in a group
+/// of 2 nobody can remove them (user, 27 November 2026). This is the
+/// calculation the state machine uses; arguments as for
+/// [`revocation_threshold`].
+pub fn super_admin_removal_threshold(listed: usize, everyone: usize) -> usize {
+    needed(listed, everyone).max(2)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -989,17 +992,11 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
         }
         Body::ProposeRevoke { target, .. } => {
             let others = stored.electorate.iter().filter(|m| *m != target).count();
-            // The SuperAdmin always needs a majority; others need one up to 5
-            // members and 3 votes from 6.
             let everyone = stored.active_before.saturating_sub(1);
-            // Removing the SuperAdmin always needs 2 votes, so in a group of
-            // 2 nobody can remove them (user, 27 November 2026).
             let threshold = if state.super_admin == Some(*target) {
-                needed(others, everyone).max(2)
-            } else if stored.active_before <= SMALL_GROUP_MAX {
-                needed(others, everyone)
+                super_admin_removal_threshold(others, everyone)
             } else {
-                LARGE_GROUP_REVOKE_APPROVALS
+                revocation_threshold(others, everyone, stored.active_before)
             };
             state.revocations.insert(
                 hash,

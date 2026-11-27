@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, and a third found 4; both are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -251,14 +251,27 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     zeros for group messages) and the hour number (8, big-endian). Naming sender
     and recipient separates the two directions of a pair, so the two phones
     never use the same key.
+  - **Which hour** (revised after the third review). A receiver does not guess:
+    - for an envelope, the hour is taken from the envelope's own creation time,
+      which is in `Header::binding()` and so is checked by the cipher;
+    - for a hand-over piece, the hour it was wrapped in travels in the clear
+      next to its label (8 bytes) and is part of its associated data.
+
+    A receiver derives the one key for that hour, and accepts hours from
+    25 hours ago to 1 hour ahead, the same window as address labels: 24 hours
+    of envelope lifetime plus room for clock differences.
   - **Associated data:** for an envelope, the label and the envelope's
     immutable header bytes from `Header::binding()` in `core/src/envelope.rs`,
     which already leave out the hop count relays change. For a hand-over piece
-    (3.9), the piece's own label and tag only, so a piece can move to a new
-    batch unchanged.
+    (3.9), the piece's own label, hour and tag only, so a piece can move to a
+    new batch unchanged.
   - **Format:** `YGO1`, nonce (24), ciphertext with its 16-byte tag.
-  - **Retries** resend the stored bytes; nothing is encrypted twice. A receiver
-    tries the current and the previous hour's key.
+  - **Retries** resend the stored bytes unchanged while they are under 20
+    hours old. A hand-over piece still waiting after that is **re-wrapped**: the
+    libsignal message inside is kept exactly as it was, so its session is not
+    disturbed, and only the outer layer is redone, under the current hour with
+    a fresh random nonce. The receiver ignores a repeat of a generation it
+    already has, so a re-wrapped copy is harmless.
 
   This layer is new and **needs its own review, with test vectors, before it is
   relied on**; until then, the privacy claims in section 4 hold only without
@@ -370,18 +383,20 @@ scramble removed them.
 
 **Measured sizes** with the pinned libsignal, using the program in
 [`experiments/sender-key-sizes/`](../../experiments/sender-key-sizes/README.md)
-(one desktop run on 26 November 2026, no mesh). Each figure is the largest seen
-in that case, which is evidence, not a proven maximum.
+(one desktop run on 27 November 2026, no mesh). It encodes the hand-over as laid
+out in section 5, and adds the bytes each piece carries outside libsignal: its
+label, hour, the outer layer and its length in a batch (70 bytes, exact by
+construction). Each figure is the largest seen in that case: evidence, not a
+proven maximum.
 
 | Item | Bytes |
 | --- | --- |
 | Pre-key bundle | about 1,775 |
-| Sender-key distribution message | 96 |
-| Hand-over on a new session, before any reply (largest of 10) | 1,918 |
-| Hand-over on an open session, alternating (largest of 200) | 266 |
-| Hand-over on an open session, one way only (largest of 200) | 269 |
-| Group message carrying 100 bytes of text | 205 |
-| Group message carrying 1,024 bytes of text | 1,134 |
+| Sender-key distribution message | 95–96 |
+| Piece, new session before any reply, naming 0 / 1 / 16 events | 2,020 / 2,052 / 2,532 |
+| Piece, open session, naming 0 / 1 / 16 events | 371 / 403 / 883 |
+| Group message carrying 100 bytes of text, before the outer layer's 44 | 204–205 |
+| Group message carrying 1,024 bytes of text, before the outer layer's 44 | 1,133–1,134 |
 
 **Batching by size** (Codex finding 6). A removal in a full group of 128 means
 127 × 126 = 16,002 hand-overs. One per envelope would be 16,002 envelopes,
@@ -397,14 +412,17 @@ sizes allow:
 
 | Event, group of 128 | Envelopes | Total size |
 | --- | --- | --- |
-| A removal, every session open | 127, one per remaining member | about 4.6 MB |
-| A removal, no sessions open yet (worst case) | about 635, five per member | about 31 MB |
-| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 490 KB |
-| One member's weekly key change | 1 | about 36 KB |
+| A removal naming 1 event, every session open | 127, one per remaining member | about 6.4 MB |
+| A removal naming 16 events, every session open | about 254, two per member | about 14 MB |
+| A removal naming 1 event, no sessions open yet (worst case) | about 635, five per member | about 33 MB |
+| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 510 KB |
+| One member's weekly key change | 1 | about 47 KB |
 
 The worst case is far over one phone's relay limits, so the mesh will drop some
 of it and resynchronising (3.7) repairs the rest more slowly. Sessions are
 normally opened when a member joins, which keeps removals near the first row.
+Even the first row is most of one phone's 8 MiB relay limit, which is part of
+why batch custody stays open below.
 
 **Carrying a batch** (Codex finding 7). A batch has many recipients, so the
 one-recipient custody rules do not fit. Proposed:
@@ -613,8 +631,11 @@ it: **not an independent review**.
 6. **Limits against a hostile member.** *Proposed:*
    - at most 127 sessions per group, following the member cap;
    - at most 8 sending-key generations kept per member, for 24 hours (3.6);
-   - changes justified by the group log are never refused; routine changes are
-     limited to 2 per member per day (3.6, Codex finding 10);
+   - changes justified by the group log are never refused; the weekly change is
+     limited to one per sender in any 6 days, and recovery to one per sender
+     per hour, each limit separate (3.6, Codex findings 10 and, from the second
+     review, 2). Receivers enforce them: a phone that gets a change beyond a
+     limit ignores it and warns;
    - at most 4 new sessions accepted from one member per day, after a cheap
      membership check (3.2, Codex finding 13);
    - libsignal lets a message skip up to 25,000 chain steps
@@ -675,6 +696,13 @@ planned future feature; version 1 is one device per member.
     named twice;
   - a paperwork phone that sends its offer and then disappears, at each of the
     three steps.
+- After the third Codex review:
+  - an envelope delivered 3 and 23 hours after it was made, and one made just
+    before an hour boundary by a phone whose clock runs ahead;
+  - a delayed hand-over piece moved into a new batch, and one re-wrapped after
+    20 hours;
+  - more than two recoveries in one day accepted by receivers under the same
+    rules senders follow.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.

@@ -162,10 +162,16 @@ fn independent_approval_switched_off() {
 
 #[test]
 fn revocation_thresholds() {
-    // Up to 5: majority of everyone except the target. From 6: three.
+    // Up to 5: majority of everyone except the target, with everyone listed.
+    // From 6: three.
     let expected = [(2, 1), (3, 2), (4, 2), (5, 3), (6, 3), (10, 3), (50, 3)];
-    for (size, needed) in expected {
-        assert_eq!(revocation_threshold(size), needed, "group of {size}");
+    for (size, want) in expected {
+        let others = size - 1;
+        assert_eq!(
+            revocation_threshold(others, others, size),
+            want,
+            "group of {size}"
+        );
     }
 }
 

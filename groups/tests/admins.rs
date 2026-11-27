@@ -206,7 +206,7 @@ fn the_super_admin_can_be_voted_out_even_with_revoking_off() {
 fn removing_the_super_admin_needs_a_majority_in_large_groups_too() {
     // Seven members: a majority of the other 6 is 4, not the usual 3.
     let (mut log, p) = normal_of(7, false);
-    assert_eq!(super_admin_removal_threshold(7), 4);
+    assert_eq!(super_admin_removal_threshold(6, 6), 4);
     vote_out(&mut log, &[&p[1], &p[2], &p[3]], &p[0]);
     assert!(log.state().unwrap().is_active(&p[0].key()));
     let r = log
