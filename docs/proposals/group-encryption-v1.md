@@ -249,7 +249,8 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     `Yap outer layer v1`, and as info: the kind (1 byte: `0x01` for a group
     message, `0x02` for a one-to-one piece), the
     group ID (16), the sender's member key (32), the recipient's member key (32,
-    zeros for group messages) and the hour number (8, big-endian). Naming sender
+    zeros for group messages) and the hour number (8, big-endian); 32 bytes
+    out. Naming sender
     and recipient separates the two directions of a pair, so the two phones
     never use the same key.
   - **Which hour** (revised after the third review). A receiver does not guess:
@@ -259,24 +260,32 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
       next to its label (8 bytes) and is part of its associated data.
 
     A receiver derives the one key for that hour, and accepts hours from
-    25 hours ago to 1 hour ahead, the same window as address labels: 24 hours
-    of envelope lifetime plus room for clock differences.
+    25 hours before its own current hour to 1 hour after it, inclusive, the
+    same window as address labels: 24 hours of envelope lifetime plus room for
+    clock differences. The window is coarse (a piece can be almost 26 hours
+    old), so an envelope must also pass its own exact expiry and lifetime
+    checks.
   - **Associated data:** for an envelope, exactly the 68 bytes of
     `Header::binding()` in `core/src/envelope.rs`. They already include the
     label (as the destination) and the creation time, and leave out the hop
     count that relays change. For a hand-over piece (3.9), its label (16) then
     its hour (8, big-endian), so a piece can move to a new batch unchanged.
   - **Format:** `YGO1`, nonce (24), ciphertext with its 16-byte tag.
-  - **Retries** resend the stored bytes unchanged while they are under 20
-    hours old. A hand-over piece still waiting after that is **re-wrapped**: the
-    libsignal message inside is kept exactly as it was, so its session is not
-    disturbed, and only the outer layer is redone, under the current hour with
-    a fresh random nonce. The receiver ignores a repeat of a generation it
+  - **Retries** resend the stored bytes unchanged until the piece has waited
+    20 whole hours since it was last wrapped. From exactly 20 hours it is
+    **re-wrapped** before it is sent again: the libsignal message inside is kept
+    exactly as it was, so its session is not disturbed, and only the outer
+    layer is redone, under the current hour, with that hour's label and a fresh
+    random nonce. The new wrapper is saved before it is sent. A phone that slept
+    for longer re-wraps before sending anything. The receiver ignores a repeat of a generation it
     already has, so a re-wrapped copy is harmless.
 
   **Test vectors:** [`experiments/outer-layer-vectors/`](../../experiments/outer-layer-vectors/README.md)
-  (27 November 2026) gives fixed inputs and exact outputs for these rules, and
-  checks the two libraries against their published test examples. Its code is
+  (27 November 2026) gives fixed inputs and exact outputs for these rules,
+  checks the two libraries against their published test examples in full, and
+  tests the receive window and re-wrapping rules with a supplied clock. A Codex
+  review the same day recomputed every vector independently and found no
+  critical or high problems. Its code is
   a reference for the vectors only, not the app's implementation.
 
   This layer is new and **needs its own review before it is relied on**; until then, the privacy claims in section 4 hold only without

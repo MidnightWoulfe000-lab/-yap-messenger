@@ -16,15 +16,26 @@ cargo run > vectors.txt  # regenerates it after a reviewed change to the rules
 ```
 
 The tests also check:
-- the HKDF library against RFC 5869 test case 1;
+- the HKDF library against RFC 5869 test case 1 (all 42 bytes);
 - the XChaCha20-Poly1305 library against the published example in
-  draft-irtf-cfrg-xchacha-03, appendix A.3.1;
-- that tampering with the ciphertext, associated data or format tag is refused;
+  draft-irtf-cfrg-xchacha-03, appendix A.3.1 (all 130 bytes of ciphertext and
+  tag);
+- that changing the format tag, nonce, ciphertext or tag, or cutting or
+  lengthening the output, is refused;
+- that each envelope header field (ID, label, sender hint, creation time,
+  expiry) is bound on its own, and a piece's label and hour too;
 - that the two directions of a pair, and group and pair messages, get
-  different keys;
-- that an hour boundary changes the key;
-- that a relay lowering the hop count does not break an envelope, but a
-  changed creation time does.
+  different keys, and an hour boundary changes the key;
+- that a relay lowering the hop count does not break an envelope.
+
+[`src/policy.rs`](src/policy.rs) adds the receive and re-wrapping rules, with
+the clock and nonce passed in, and [`tests/policy.rs`](tests/policy.rs) checks
+them: hours 25 back and 1 ahead accepted, 26 back and 2 ahead refused, no
+underflow near zero, pieces opening after 3 and 23 hours, re-wrapping starting
+at exactly 20 hours, a re-wrapped piece keeping its inner bytes while its old
+label and hour are refused, and random nonces differing.
 
 The vectors fix the nonce so the output is repeatable. In use the nonce is 24
-random bytes from a cryptographically secure source, new for every message.
+random bytes from the operating system's secure random source
+(`policy::random_nonce`), new for every message. Fixed nonces must never be
+used outside tests.

@@ -132,3 +132,20 @@ the unbound hop count. GitHub's Rust checks now run it.
 Still outstanding before implementation: review of the outer layer with these
 vectors, the batch custody questions left to the mesh design, and an
 independent expert review before any sensitive use.
+
+## Outer-layer review (27 November 2026)
+
+Answers [the Codex outer-layer review](2026-11-27-group-encryption-v1-outer-layer-review.md),
+which found no critical or high problems and recomputed all five vectors
+independently, with an exact match. Both medium findings are accepted.
+
+| # | Status | What changes |
+| --- | --- | --- |
+| 1 | Accepted, fixed | The XChaCha20-Poly1305 check now compares all 130 published bytes. New tests flip the format tag, nonce, ciphertext and tag, cut and lengthen the output, change each header field on its own (including creation time and expiry separately), and change a piece's label and hour. The kind test now uses the canonical zero recipient for group messages. |
+| 2 | Accepted, fixed | `src/policy.rs` adds the receive window and re-wrapping rules with the clock and nonce passed in, and `tests/policy.rs` tests them: −25 and +1 hours accepted, −26 and +2 refused, no underflow, 3- and 23-hour delays, a clock 1 hour ahead, re-wrapping from exactly 20 hours, a re-wrapped piece keeping its inner bytes under a new label and hour, and random nonces. Proposal §3.4 now states the 20-hour boundary, the 32-byte key length, that a re-wrap takes that hour's label, and that the window is coarse and envelopes keep their exact expiry checks. |
+
+The outer layer's byte rules are now confirmed by an independent recomputation.
+Still outstanding: the batch custody questions left to the mesh design, the
+full receive path (hand-over checks, duplicates, persistence) when group
+encryption is built, and an independent expert review before any sensitive
+use.

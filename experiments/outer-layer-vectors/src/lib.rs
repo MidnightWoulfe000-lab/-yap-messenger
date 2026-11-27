@@ -14,6 +14,8 @@
 //! - output = `YGO1` ‖ nonce (24) ‖ XChaCha20-Poly1305 ciphertext and tag.
 //!   In use the nonce is random; vectors fix it.
 
+pub mod policy;
+
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;

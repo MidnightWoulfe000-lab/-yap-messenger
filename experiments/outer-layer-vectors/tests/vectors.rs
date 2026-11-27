@@ -37,7 +37,7 @@ fn every_vector_opens_and_rejects_tampering() {
         );
         let mut bad = v.sealed.clone();
         *bad.last_mut().unwrap() ^= 1;
-        assert_eq!(open(&v.key, &v.ad, &bad), None, "tampered tag: {}", v.name);
+        assert_eq!(open(&v.key, &v.ad, &bad), None, "last tag byte: {}", v.name);
         let mut bad_ad = v.ad.clone();
         bad_ad[0] ^= 1;
         assert_eq!(
@@ -86,25 +86,16 @@ fn the_hop_count_is_not_bound() {
 }
 
 #[test]
-fn a_changed_creation_time_is_refused() {
-    let v = &vectors()[0];
-    assert_eq!(
-        open(&v.key, &envelope_ad(&header(NOON_MS + 1)), &v.sealed),
-        None
-    );
-}
-
-#[test]
 fn group_and_pair_kinds_give_different_keys() {
     let hour = hour_of(NOON_MS);
-    let group = derive_key(&LABEL_KEY, &info(KIND_GROUP, &GROUP, &ALICE, &BOB, hour));
+    let group = derive_key(&LABEL_KEY, &info(KIND_GROUP, &GROUP, &ALICE, &NOBODY, hour));
     let pair = derive_key(&LABEL_KEY, &info(KIND_PAIR, &GROUP, &ALICE, &BOB, hour));
     assert_ne!(group, pair);
 }
 
 #[test]
 fn xchacha20poly1305_matches_the_published_example() {
-    // draft-irtf-cfrg-xchacha-03, appendix A.3.1.
+    // draft-irtf-cfrg-xchacha-03, appendix A.3.1: the whole ciphertext and tag.
     use chacha20poly1305::aead::{Aead, KeyInit, Payload};
     use chacha20poly1305::{XChaCha20Poly1305, XNonce};
     let key: Vec<u8> = (0x80..=0x9f).collect();
@@ -116,7 +107,81 @@ fn xchacha20poly1305_matches_the_published_example() {
     let out = XChaCha20Poly1305::new(key.as_slice().into())
         .encrypt(XNonce::from_slice(&nonce), Payload { msg, aad: &ad })
         .unwrap();
-    let out = hex(&out);
-    assert!(out.starts_with("bd6d179d3e83d43b9576579493c0e939"), "{out}");
-    assert!(out.ends_with("c0875924c1c7987947deafd8780acf49"), "{out}");
+    let published = concat!(
+        "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb",
+        "731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b452",
+        "2f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff9",
+        "21f9664c97637da9768812f615c68b13b52e",
+        "c0875924c1c7987947deafd8780acf49"
+    );
+    assert_eq!(out.len(), 130);
+    assert_eq!(hex(&out), published);
+}
+
+#[test]
+fn every_part_of_the_sealed_output_is_checked() {
+    for v in vectors() {
+        let flips = [
+            ("format tag", 0),
+            ("nonce", 4),
+            ("ciphertext or tag start", 28),
+            ("tag end", v.sealed.len() - 1),
+        ];
+        for (what, at) in flips {
+            let mut bad = v.sealed.clone();
+            bad[at] ^= 1;
+            assert_eq!(open(&v.key, &v.ad, &bad), None, "{what}: {}", v.name);
+        }
+        if v.sealed.len() > 44 {
+            let mut bad = v.sealed.clone();
+            bad[29] ^= 1;
+            assert_eq!(open(&v.key, &v.ad, &bad), None, "ciphertext: {}", v.name);
+        }
+        let truncated = &v.sealed[..v.sealed.len() - 1];
+        assert_eq!(
+            open(&v.key, &v.ad, truncated),
+            None,
+            "truncated: {}",
+            v.name
+        );
+        let mut extended = v.sealed.clone();
+        extended.push(0);
+        assert_eq!(open(&v.key, &v.ad, &extended), None, "extended: {}", v.name);
+    }
+}
+
+#[test]
+fn each_header_field_is_bound_on_its_own() {
+    let v = &vectors()[0];
+    let base = header(NOON_MS);
+    let mut changed = Vec::new();
+    let mut h = base;
+    h.id[0] ^= 1;
+    changed.push(("ID", h));
+    let mut h = base;
+    h.destination[0] ^= 1;
+    changed.push(("label", h));
+    let mut h = base;
+    h.sender_hint[0] ^= 1;
+    changed.push(("sender hint", h));
+    let mut h = base;
+    h.created_ms += 1;
+    changed.push(("creation time alone", h));
+    let mut h = base;
+    h.expires_ms -= 1;
+    changed.push(("expiry alone", h));
+    for (what, h) in changed {
+        assert_eq!(open(&v.key, &envelope_ad(&h), &v.sealed), None, "{what}");
+    }
+}
+
+#[test]
+fn a_piece_binds_its_label_and_its_hour() {
+    let v = &vectors()[2];
+    let mut label = v.ad.clone();
+    label[0] ^= 1;
+    assert_eq!(open(&v.key, &label, &v.sealed), None, "label");
+    let mut hour = v.ad.clone();
+    *hour.last_mut().unwrap() ^= 1;
+    assert_eq!(open(&v.key, &hour, &v.sealed), None, "hour");
 }
