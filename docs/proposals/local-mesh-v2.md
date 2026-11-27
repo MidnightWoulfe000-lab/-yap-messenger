@@ -117,6 +117,9 @@ after rotation is harmless: the original relay's 10-minute recent cache refuses 
 ## Spray and wait (12 copies) and effort stamps
 
 Owner decisions (25 Nov 2026): limited-copy routing with 12 copies, and an effort stamp.
+**Changing in mesh v3.1** (owner, 27 Nov 2026): 96 copies for one-to-one envelopes, after
+a simulation; see [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) §1.3. Not built
+yet; the code still uses 12.
 
 **Frame:** nearby ENVELOPE frames are now `copies (1) + effort stamp (8) + envelope`.
 New frame DELIVERED (8, 48-byte relay key) means "I am the recipient and have it".
