@@ -1,6 +1,6 @@
 # Local mesh v4: link topology for large crowds
 
-**Status: draft proposal; the owner answered the open questions on 26 November 2026 (see
+**Status: shelved (project owner, 27 November 2026): in simulation it made delivery worse, and no fix has been found yet. Mesh v3.1 does not depend on it.** Earlier status: draft proposal; the owner answered the open questions on 26 November 2026 (see
 [Decisions](#decisions-26-november-2026)). Nothing here is implemented. Parameter values
 are starting guesses to be tested in simulation, not decisions. The cryptographic details
 still need a written specification and review before any code.**

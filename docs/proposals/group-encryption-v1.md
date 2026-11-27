@@ -446,9 +446,10 @@ proven maximum.
 | Group message carrying 1,024 bytes of text, before the outer layer's 44 | 1,133–1,134 |
 
 **Batching by size** (Codex finding 6). A removal in a full group of 128 means
-127 × 126 = 16,002 hand-overs. One per envelope would be 16,002 envelopes,
-against the proposed relay limits of 1,024 pending envelopes and 8 MiB per
-phone. So each member packs its pieces into as few envelopes as their actual
+127 × 126 = 16,002 hand-overs. One per envelope would be 16,002 envelopes. A
+phone carrying nearby messages holds at most 10,000 envelopes and 64 MiB
+(local mesh v2, "Carrier storage"; the 1,024 envelopes and 8 MiB once cited here
+are the internet relay server's limits). So each member packs its pieces into as few envelopes as their actual
 sizes allow:
 - at most 56 KiB of pieces per envelope, leaving room in the 64 KiB limit for
   the header and outer layer;
@@ -465,11 +466,11 @@ sizes allow:
 | A newcomer joins | about 127 to the newcomer, and 5 batches back | about 520 KB |
 | One member's weekly key change | 1 | about 49 KB |
 
-The worst case is far over one phone's relay limits, so the mesh will drop some
-of it and resynchronising (3.7) repairs the rest more slowly. Sessions are
-normally opened when a member joins, which keeps removals near the first row.
-Even the first row is most of one phone's 8 MiB relay limit, which is part of
-why batch custody stays open below.
+The first row is about a tenth of one phone's carrier storage and the worst case
+about half, so one removal fits; several at once, or a busy crowd, can still
+push batches out, and resynchronising (3.7) repairs that more slowly. Sessions
+are normally opened when a member joins, which keeps removals near the first
+row.
 
 **Carrying a batch** (Codex finding 7). A batch has many recipients, so the
 one-recipient custody rules do not fit. Proposed:
@@ -482,9 +483,9 @@ one-recipient custody rules do not fit. Proposed:
 - each piece states inside its own encryption the group, the recipient and the
   generation, so it is checked on its own and does not depend on the batch.
 
-How relays rank batches against other traffic, and what relay storage this
-really uses as copies spread, belongs to the mesh design and must be measured.
-**Open until then.**
+How nearby carriers handle group envelopes (no `DELIVERED`, more copies,
+batches kept whole, eviction and flood limits) is proposed in
+[local mesh v3.1](local-mesh-v3.1-group-envelopes.md), awaiting review.
 
 **MLS** (the IETF Messaging Layer Security standard) makes a removal cost far
 less in large groups. It is not proposed for version 1 because it needs every
