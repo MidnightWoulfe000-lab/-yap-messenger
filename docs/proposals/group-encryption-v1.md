@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, and a third found 4; both are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, a third found 4 and a fourth found 2; all are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -306,13 +306,46 @@ change, not one each.
 changes are never refused, because refusing one could keep a removed member
 in. They are merged and scheduled instead. Each governance event can justify one
 change per sender: naming an event that sender already answered does not count.
-The other kinds have **separate** limits, so one cannot use up another's:
+The other kinds have **separate** budgets, so one cannot use up another's.
+These are rules for **senders**, by the generation's creation time, which the
+hand-over carries:
 - weekly: at most one per sender in any 6 days;
 - recovery: at most one per sender per hour, however many receivers ask, and
   never counted against the weekly limit.
 
-Anything beyond these is ignored and the app warns. At worst a hostile member
-can force 24 recovery changes a day, each one envelope or a few.
+**Receivers do not refuse generations for coming too often** (revised after the
+fourth review). Delayed hand-overs can arrive together after a mesh delay even
+from a sender who kept to its budget, and refusing the newest would leave its
+messages unreadable. Instead a receiver bounds its own work:
+- it processes at most 4 hand-over pieces per sender per hour, by its own
+  clock;
+- pieces over that wait in a queue that keeps, per sender, only the newest
+  pending generation, saved in the encrypted store so it survives a restart. A
+  newer piece replaces an older one waiting; the older one's delayed messages
+  may then be lost;
+- a generation it has already accepted, including a re-wrapped copy, never
+  uses up any allowance (see "Repeated pieces" below);
+- if a sender's own creation times show it breaking its budget, the app warns.
+  It still installs the newest generation, because a hostile member can only
+  waste the work above, which is bounded.
+
+At worst a hostile member makes each receiver process 4 pieces an hour from
+them.
+
+**Repeated pieces** (added after the fourth review). After libsignal has
+accepted a message once, it refuses the identical message again
+(`DuplicatedMessage`). So a re-sent or re-wrapped hand-over, whose libsignal
+message inside is unchanged, cannot simply be decrypted again to find its
+generation. Instead, when a receiver accepts a piece, it saves, in the same
+commit, a record of: the sender, the SHA-256 of the exact libsignal message,
+the group, the generation and the acknowledgement it sent. When a piece
+arrives later, the receiver first removes the outer layer, which proves it
+came from someone holding the pair's label key. If the digest of the libsignal
+message inside matches a record for that sender, it resends the stored
+acknowledgement, at most once an hour per piece, and does not call libsignal.
+Otherwise it decrypts as normal. A `DuplicatedMessage` error with no matching
+record is never treated as proof of acceptance; the piece is dropped and
+logged. Records are kept as long as their generation is.
 
 **Keeping old keys.** Old sending keys, its own and others', are kept for 24
 hours, so slow messages can still be read, with at most 8 generations per
@@ -393,8 +426,8 @@ proven maximum.
 | --- | --- |
 | Pre-key bundle | about 1,775 |
 | Sender-key distribution message | 95–96 |
-| Piece, new session before any reply, naming 0 / 1 / 16 events | 2,020 / 2,052 / 2,532 |
-| Piece, open session, naming 0 / 1 / 16 events | 371 / 403 / 883 |
+| Piece, new session before any reply, naming 0 / 1 / 16 events | 2,036 / 2,068 / 2,548 |
+| Piece, open session, naming 0 / 1 / 16 events | 387 / 419 / 899 |
 | Group message carrying 100 bytes of text, before the outer layer's 44 | 204–205 |
 | Group message carrying 1,024 bytes of text, before the outer layer's 44 | 1,133–1,134 |
 
@@ -412,11 +445,11 @@ sizes allow:
 
 | Event, group of 128 | Envelopes | Total size |
 | --- | --- | --- |
-| A removal naming 1 event, every session open | 127, one per remaining member | about 6.4 MB |
-| A removal naming 16 events, every session open | about 254, two per member | about 14 MB |
+| A removal naming 1 event, every session open | 127, one per remaining member | about 6.7 MB |
+| A removal naming 16 events, every session open | about 254, two per member | about 14.4 MB |
 | A removal naming 1 event, no sessions open yet (worst case) | about 635, five per member | about 33 MB |
-| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 510 KB |
-| One member's weekly key change | 1 | about 47 KB |
+| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 520 KB |
+| One member's weekly key change | 1 | about 49 KB |
 
 The worst case is far over one phone's relay limits, so the mesh will drop some
 of it and resynchronising (3.7) repairs the rest more slowly. Sessions are
@@ -604,14 +637,17 @@ it: **not an independent review**.
    and 9:* the recipient acknowledges each piece over their session, naming the
    generation. The sender resends unacknowledged pieces, batched, until they are
    acknowledged or the recipient stops being a member, resending only the
-   newest generation. Members compare generations over their one-to-one
+   newest generation. A receiver answers a repeat of a piece it already
+   accepted from its saved record, without libsignal (3.6, "Repeated pieces"). Members compare generations over their one-to-one
    sessions when they reconnect (3.7). A receiver too far behind gets a fresh
    generation rather than a resend (3.6).
 4. **Encodings.** *Proposed layouts.* Every field has a fixed size or a length
    limit, and each kind starts with its own tag. A hash covers a tag naming its
    purpose as well as the bytes.
    - Hand-over piece (revised after the second review): `YGH1`, group ID (16),
-     recipient's member key (32), generation number (4), kind (1: justified,
+     recipient's member key (32), generation number (4), the hour the generation
+     was created (8, sender's clock; used for budgets and warnings only),
+     kind (1: justified,
      weekly or recovery), the governance events it answers (count of at most
      16, then 32 each; none unless justified), distribution ID (16), label key
      (32), the distribution message (length-prefixed, at most 256 bytes).
@@ -634,8 +670,10 @@ it: **not an independent review**.
    - changes justified by the group log are never refused; the weekly change is
      limited to one per sender in any 6 days, and recovery to one per sender
      per hour, each limit separate (3.6, Codex findings 10 and, from the second
-     review, 2). Receivers enforce them: a phone that gets a change beyond a
-     limit ignores it and warns;
+     review, 2). These bind senders. Receivers never refuse the newest
+     generation for its rate; they process at most 4 pieces per sender per hour,
+     keep only the newest waiting, and warn when a sender breaks its budget
+     (fourth review, 2);
    - at most 4 new sessions accepted from one member per day, after a cheap
      membership check (3.2, Codex finding 13);
    - libsignal lets a message skip up to 25,000 chain steps
@@ -703,6 +741,17 @@ planned future feature; version 1 is one device per member.
     20 hours;
   - more than two recoveries in one day accepted by receivers under the same
     rules senders follow.
+- After the fourth Codex review:
+  - a lost acknowledgement, then a re-sent, a re-wrapped (after 20 hours) and
+    a re-batched copy, each answered from the saved record without libsignal;
+  - the same after the receiver restarts between accepting and acknowledging;
+  - a tampered retry, and a `DuplicatedMessage` with no saved record, both
+    dropped;
+  - two recovery generations made an hour apart and delivered together, in
+    both orders, and two weekly ones a week apart delivered together: the
+    newest is installed either way;
+  - a restart while a piece is waiting in the queue;
+  - an old generation arriving just before the newest.
 - Old keys are deleted after the envelope lifetime, and a restored backup cannot
   bring them back.
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.

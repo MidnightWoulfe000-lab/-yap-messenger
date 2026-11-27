@@ -99,3 +99,20 @@ which found no critical problems: 1 high and 3 medium. All four are accepted.
 
 Still outstanding before implementation: outer-layer test vectors, the batch
 custody questions left to the mesh design, and review of these changes.
+
+## Fourth review (27 November 2026)
+
+Answers [the fourth Codex review](2026-11-27-group-encryption-v1-fourth-review.md),
+which found 2 medium problems and confirmed the third review's four are
+addressed. Both are accepted.
+
+| # | Status | What changes |
+| --- | --- | --- |
+| 1 | Accepted; proposal revised | §3.6 "Repeated pieces": on accepting a piece, the receiver saves in the same commit the sender, the digest of the exact libsignal message, the group, the generation and its acknowledgement. A later copy whose inner digest matches, after its outer layer checks out, gets the stored acknowledgement again without calling libsignal. A `DuplicatedMessage` with no record is never taken as acceptance. |
+| 2 | Accepted; proposal revised | §3.6: the weekly and recovery limits are now budgets for senders, measured by a creation hour the hand-over carries. Receivers never refuse the newest generation for its rate; they process at most 4 pieces per sender per hour, keep only the newest waiting (saved across restarts), never charge repeats, and warn about senders over budget. The new creation-hour field adds 8 bytes to each piece; §3.9's figures are re-measured (a removal with open sessions is now about 6.7 MB). |
+
+This round found nothing critical or high, which meets the stopping point
+agreed with the project owner for design review rounds. Still outstanding
+before implementation: outer-layer test vectors, the batch custody questions
+left to the mesh design, and an independent expert review before any sensitive
+use.

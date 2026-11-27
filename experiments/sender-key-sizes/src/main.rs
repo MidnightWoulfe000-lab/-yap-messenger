@@ -19,6 +19,7 @@ fn hand_over(events: usize, distribution: &[u8]) -> Vec<u8> {
     b.extend_from_slice(&[1; 16]); // group ID
     b.extend_from_slice(&[2; 32]); // recipient member key
     b.extend_from_slice(&7u32.to_be_bytes()); // generation
+    b.extend_from_slice(&493_000u64.to_be_bytes()); // hour created
     b.push(if events > 0 { 0 } else { 1 }); // kind
     b.push(events as u8);
     for _ in 0..events {
