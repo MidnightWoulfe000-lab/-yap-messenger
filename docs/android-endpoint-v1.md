@@ -155,6 +155,10 @@ remote identity is atomic with local confirmation. A signed confirmation is stor
 as exact bytes and retransmitted at most four times a minute until authenticated
 session traffic proves that the peer progressed, or expiry. Receiving a matching
 confirmation also schedules the exact local confirmation within that budget.
+Retransmissions use at most three of the four, counting the send made at scan
+time, so the first valid confirmation from the peer is always answered at once.
+A phone that has handed its bundle to a phone that proved it scanned the QR keeps
+that offer on screen instead of rotating it, until it scans back or the offer expires.
 Repeated exact confirmations are idempotent; they never recreate a
 session or replace a prekey. Confirmations arriving before the user has scanned
 the peer do not create state and may be retried later.

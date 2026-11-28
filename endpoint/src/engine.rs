@@ -51,8 +51,49 @@ struct Contact {
     ready: bool,
     phase: String,
     last_confirm: u64,
+    /// When our confirmation was last handed to the host to send, newest last
+    /// (at most four within a minute). Older snapshots start empty.
+    #[serde(default)]
+    confirm_sends: Vec<u64>,
     setup_id: Option<Token>,
     created: u64,
+}
+/// The contract allows four confirmation sends a minute. Retransmissions use at
+/// most three, so one is always left to answer the peer's first valid
+/// confirmation straight away. Without that reserve, a phone that scanned first
+/// had spent its allowance on copies the other phone could not yet accept, and
+/// answered the other phone's confirmation only at its next retransmission.
+const CONFIRM_SENDS_PER_MINUTE: usize = 4;
+const CONFIRM_RETRIES_PER_MINUTE: usize = 3;
+const CONFIRM_RETRY_MS: u64 = 15_000;
+#[derive(PartialEq)]
+enum ConfirmSend {
+    /// A periodic retransmission from `pending`.
+    Retry,
+    /// Answering a repeated confirmation: the peer still lacks ours.
+    Answer,
+    /// Answering the first valid confirmation, which completed mutual proof here.
+    FirstAnswer,
+}
+impl Contact {
+    /// Takes one send from the confirmation budget, if there is one left.
+    fn take_confirm_send(&mut self, kind: ConfirmSend, now: u64) -> bool {
+        self.confirm_sends
+            .retain(|sent| *sent <= now && now - sent < 60_000);
+        let limit = if kind == ConfirmSend::Retry {
+            CONFIRM_RETRIES_PER_MINUTE
+        } else {
+            CONFIRM_SENDS_PER_MINUTE
+        };
+        let spaced = kind == ConfirmSend::FirstAnswer
+            || now.saturating_sub(self.last_confirm) >= CONFIRM_RETRY_MS;
+        if self.confirm_sends.len() >= limit || !spaced {
+            return false;
+        }
+        self.confirm_sends.push(now);
+        self.last_confirm = now;
+        true
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Pending {
@@ -307,7 +348,9 @@ impl State {
             remote_confirmation: None,
             ready: false,
             phase: "Waiting for mutual confirmation".into(),
-            last_confirm: 0,
+            // The host sends this confirmation as soon as pairing returns.
+            last_confirm: now,
+            confirm_sends: vec![now],
             setup_id: None,
             created: now,
         };
@@ -371,13 +414,17 @@ impl State {
                 self.queue(&id, envelope, 3, now)?;
             }
         }
-        // Also retry our proof when receiving theirs; stored exact bytes only.
-        let confirmation = if now.saturating_sub(contact.last_confirm) >= 15_000 {
-            contact.last_confirm = now;
-            Some(bytes::encode(&contact.confirmation.0))
+        // Answer their proof with ours, stored exact bytes only. The first valid
+        // confirmation is always answered at once: until then the peer may have
+        // dropped every copy of ours, because it had not scanned us yet.
+        let kind = if first {
+            ConfirmSend::FirstAnswer
         } else {
-            None
+            ConfirmSend::Answer
         };
+        let confirmation = contact
+            .take_confirm_send(kind, now)
+            .then(|| bytes::encode(&contact.confirmation.0));
         self.contacts.insert(id, contact);
         Ok(json!({"confirmation":confirmation}))
     }
@@ -772,9 +819,8 @@ impl State {
             }
             if !contact.ready
                 && !contact.phase.starts_with("Pairing expired")
-                && now.saturating_sub(contact.last_confirm) >= 15_000
+                && contact.take_confirm_send(ConfirmSend::Retry, now)
             {
-                contact.last_confirm = now;
                 let remote = PublicBundle::decode(&contact.remote.0)?;
                 packets.push(json!({"kind":"confirmation","destination":bytes::encode(&remote.route),"bytes":bytes::encode(&contact.confirmation.0)}));
             }

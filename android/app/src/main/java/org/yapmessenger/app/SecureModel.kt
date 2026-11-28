@@ -73,6 +73,14 @@ internal class SecureModel(private val application: Application) {
     var scannedQr by mutableStateOf("")
     /** True while we are asking nearby phones for the code we just scanned. */
     var searching by mutableStateOf(false); private set
+    /**
+     * The QR of our offer whose bundle a nearby phone has fetched by proving it scanned
+     * the code. That phone is pairing with exactly this offer, so it must stay on screen
+     * (and in the endpoint) until we scan them back; rotating it would make the two
+     * confirmations sign different bundles and the phones could never link.
+     */
+    var handedOutQr by mutableStateOf(""); private set
+    @Volatile private var handedOut = ""
     @Volatile private var publicState = SecureSnapshot()
     @Volatile private var foreground = false
     /** True while [MeshService] keeps nearby messaging running with no screen open. */
@@ -228,7 +236,10 @@ internal class SecureModel(private val application: Application) {
     // permanent identity key. It is only sent to a phone that proves it scanned our QR.
     fun makeOffer() { submit { call("offer"); say("Fresh pairing code created. Both people must scan and confirm.") } }
     /** Swap the on-screen code for a fresh one. Never replaces a code a friend has already scanned. */
-    fun rotateOffer() { submit(silent = true) { if (initialized && publicState.offer?.reserved != true) call("offer") } }
+    fun rotateOffer() { submit(silent = true) {
+        val offer = publicState.offer
+        if (initialized && offer?.reserved != true && offer?.qr != handedOut) call("offer")
+    } }
     fun ensureOffer() { submit { if (initialized && publicState.offer == null) call("offer") } }
     fun importPairing(text: String, name: String) {
         if (text.length > 8192) { say("Pairing package exceeds its limit"); return }
@@ -365,7 +376,10 @@ internal class SecureModel(private val application: Application) {
                     if (offer.expires <= System.currentTimeMillis()) return@submit
                     val bundle = decodeToken(offer.bundle)
                     // The reply carries our profile name after the bundle, so the friend sees who we are.
-                    if (MessageDigest.isEqual(bundleCommitment(bundle), bytes)) peer.send(MeshFrames.BUNDLE, bundle + myProfileName().toByteArray(Charsets.UTF_8).take(MeshFrames.MAX_NAME).toByteArray())
+                    if (MessageDigest.isEqual(bundleCommitment(bundle), bytes)) {
+                        handedOut = offer.qr; main.post { handedOutQr = offer.qr }
+                        peer.send(MeshFrames.BUNDLE, bundle + myProfileName().toByteArray(Charsets.UTF_8).take(MeshFrames.MAX_NAME).toByteArray())
+                    }
                 }
             }
             MeshFrames.BUNDLE -> {

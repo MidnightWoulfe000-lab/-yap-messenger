@@ -54,7 +54,8 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
     // Friends added during this visit, so the screen can show them progressing to "added".
     val knownIds = remember { model.snapshot.contacts.map { it.id }.toSet() }
     val added = model.snapshot.contacts.filter { it.id !in knownIds }
-    LaunchedEffect(Unit) { model.ensureOffer() }
+    // Also after the code expires (ten minutes), so the screen never waits on a spinner.
+    LaunchedEffect(offer == null) { if (offer == null) model.ensureOffer() }
     // Scanning is the consent step: add straight away, no form. Both phones still confirm each other.
     LaunchedEffect(model.scannedQr) {
         val code = model.scannedQr
@@ -64,8 +65,10 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
             model.importPairing(code, "")
         }
     }
-    // The code changes every minute. A code a friend has already scanned (reserved) is left alone.
-    val reserved = offer?.reserved == true
+    // The code changes every minute. A code a friend has already scanned is left alone:
+    // reserved once we scanned them, held once their phone fetched it from us.
+    val held = offer != null && !offer.reserved && model.handedOutQr == offer.qr
+    val reserved = offer?.reserved == true || held
     val born = remember(offer?.qr) { SystemClock.elapsedRealtime() }
     var remaining by remember(offer?.qr) { mutableLongStateOf(CODE_LIFETIME_MS) }
     LaunchedEffect(offer?.qr, reserved) {
@@ -84,7 +87,9 @@ internal fun PairingScreen(model: SecureModel, scan: () -> Unit, share: (String)
                 style = MaterialTheme.typography.titleLarge, modifier = Modifier.fillMaxWidth())
             if (offer != null) {
                 PairingQr(offer.qr)
-                if (reserved) {
+                if (held) {
+                    Text("Your friend has scanned this code. Now scan theirs.", color = Soft, style = MaterialTheme.typography.bodySmall)
+                } else if (reserved) {
                     Text("Your code is linked to your new friend. Now they need to scan it too.", color = Soft, style = MaterialTheme.typography.bodySmall)
                 } else {
                     LinearProgressIndicator(progress = { remaining / CODE_LIFETIME_MS.toFloat() }, color = Lime, trackColor = Surface2,
