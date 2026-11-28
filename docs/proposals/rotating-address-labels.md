@@ -1,6 +1,6 @@
 # Proposal: rotating message address labels
 
-**Status: revised after two reviews, then touched again after Codex's fifth review of
+**Status: revised after two reviews, then touched again after Codex's fifth and sixth reviews of
 the v3.1 update (28 November 2026); do not implement yet and it needs another review.** Per `AGENTS.md` this changes
 how envelopes are addressed (a cryptographic protocol change), so it must be reviewed
 before any code is written. Tracks audit finding 1b. Codex reviewed it twice on 27
@@ -137,9 +137,10 @@ outbox, a carrier's store, any other link or the internet relay. Today `SecureMo
 confirmations (through `linkFor()`) and sends other pending packets, including the
 bootstrap, to every local link and the internet relay; that changes.
 
-If the pairing link closes before the phone is Ready, the attempt may resume on another
-authenticated link within its window, or is cancelled at the deadline (encrypted
-pairing §3); it never moves to a carrier. Only after pairing completes (Ready) does the pair send
+If the pairing link closes before the phone is Confirmed, the attempt is cancelled; from
+Confirmed until the deadline it may resume on another authenticated link, and it is
+cancelled at the deadline if not finished (encrypted pairing §3); it never moves to a
+carrier. Only after pairing completes (Ready) does the pair send
 anything through carriers, and then always with labels and the outer wrapper.
 
 ### 3. Hourly labels
@@ -259,17 +260,18 @@ the label table here.
 - Fixed test vectors for the weekly step, `labelKey`, `linkKey`, `tag` and the kind
   `0x03` outer layer with the 70-byte binding.
 - Pair secret: both phones hold it when pairing completes; a pairing link closing
-  does not cancel pairing: the attempt resumes on another authenticated link within its
-  window (encrypted pairing §3) and is cancelled only before Confirmed or at the
-  deadline; pairing either side of a week boundary gives both phones
+  after Confirmed does not cancel pairing: the attempt resumes on another authenticated
+  link within its window (encrypted pairing §3), while a link lost before Confirmed
+  cancels it, and the attempt is cancelled at the deadline if not finished; pairing either side of a week boundary gives both phones
   the same starting week; both phones step to the same secret across one, two and ten
   weeks without meeting; a week's secret is deleted 26 hours after the week ends; a
   clock moved back never brings back a deleted secret; a crash during catch-up leaves a
   consistent state; envelopes from before the starting week are refused.
 - Pairing traffic is never offered to a carrier or the internet relay, on every
   transport, and only goes over a link authenticated for that attempt (the first, or
-  one that passed the resume handshake); a closed pairing link before Ready resumes
-  on another link within the window.
+  one that passed the resume handshake); a pairing link closed before Confirmed cancels
+  the attempt, and one closed from Confirmed until the deadline resumes on another link
+  within the window.
 - Two endpoints exchange messages across an hour boundary, across a week boundary, and
   with ±5 minutes skew.
 - The table: a new contact's mail matches straight away; a removed contact's mail stops

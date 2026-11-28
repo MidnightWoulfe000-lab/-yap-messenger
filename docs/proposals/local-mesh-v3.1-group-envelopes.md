@@ -1,6 +1,6 @@
 # Local mesh v3.1: group messages, message routes and friend names
 
-**Status: revised after two reviews, then updated after Codex's fifth review (28 November
+**Status: revised after two reviews, then updated after Codex's fifth, sixth, seventh and eighth reviews (28 November
 2026); do not implement yet and it needs another review.** Codex reviewed this
 proposal and [rotating address labels](rotating-address-labels.md) twice on 27 November
 2026: five High and nine Medium findings the first time, nine High and six Medium the
@@ -27,8 +27,9 @@ the [group encryption proposal](group-encryption-v1.md) §3.4, §3.7 and §3.9,
 
 v3.1 ships in a single update together with rotating address labels (including the
 outer wrapper for one-to-one messages), encrypted pairing, group encryption,
-[local storage](local-storage-v1.md), [photos, voice notes and files](attachments-v1.md),
-the 128-contact limit, the clean-ups listed under "Also in this update" and the screen
+[local storage](local-storage-v1.md), [small photos, voice notes and files](attachments-v1.md)
+(big attachments, sent directly between two phones, move to a later update; owner, 28
+November 2026), the 128-contact limit, the clean-ups listed under "Also in this update" and the screen
 changes. Every phone is updated and re-paired: there is
 no compatibility with older builds (owner, 27 November 2026; all test phones belong to
 the owner). The envelope format version goes up by one. An older envelope or frame is
@@ -72,7 +73,7 @@ address is ignored. A "Coming soon" screen alone does not turn it off.
   optimisation (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`), explaining why. If the service
   is still being killed, Settings shows a short guide for that phone maker.
 - **The clock rule:** a clock that goes backwards no longer locks the app. Yap's
-  working time never goes back and keeps ticking on the phone's stopwatch; a forward
+  working time never goes back (one accepted exception: by up to 1 hour after the carrier store is recreated, local storage §8) and keeps ticking on the phone's stopwatch; a forward
   jump of more than 2 days waits for the user to confirm before anything is expired or
   deleted; nearby phones can only cause a "clocks disagree" note
   ([local storage](local-storage-v1.md) §8).
@@ -376,16 +377,29 @@ counted over a rolling minute. Over that, it sends a busy `WANT`, which settles
 nothing, and the offer is retried later. **Taking turns** (fifth review finding 9;
 this replaces the earlier equal-shares rule): an offer is answered whole or not at all
 (up to 64 entries; there are no partial answers). A link that gets a busy answer joins
-a **waiting line**, once, and retries every 5 seconds while it is in it. When budget
-comes free (entries answered more than a minute ago drop out of the count), it is held
-for the link at the front of the line for 10 seconds: only that link's next offer may
-use it, and only if the free budget covers that whole offer. A link that does not retry
-in those 10 seconds goes to the back. While anyone is waiting, a link not in the line
-gets busy answers. A link that closes leaves the line. So every link that keeps
-retrying is answered in turn; under heavy load each one moves slowly. This is
-best-effort progress, not a promise of speed. 600, 64 entries, 5 and 10 seconds are
-starting values. Tests: twelve links each offering 64 entries, links arriving and
-leaving while others wait, and one fast link against a slow retrying link.
+a **waiting line**, once, and retries every 5 seconds while it is in it. **The line's
+transitions** (sixth review finding 7):
+- **The front link's turn.** Budget that comes free (entries answered more than a
+  minute ago drop out of the count) is held for the front link only, and keeps
+  building up until it covers that link's whole offer (at most 64 entries, which the
+  600 always allows). While it is short, the front link's retries get busy answers and
+  it keeps its place; there is no deadline yet.
+- **Once enough is held,** the front link has 10 seconds to retry. If it does, its
+  offer is answered and it **leaves the line**; if it is busy again later, it joins at
+  the back. If it does not retry in time, it goes to the back and the held budget
+  passes to the new front link.
+- **Retry timers.** While a link is in the line, its 5-second retry replaces the
+  30, 60, 120-second back-off in the state table above. Outside the line, the back-off
+  applies.
+- While anyone is waiting, a link not in the line gets busy answers. A link that
+  closes leaves the line, and budget held for it passes to the next.
+
+So every link that stays connected and keeps retrying is answered in turn; under heavy
+load each one moves slowly. This is best-effort progress, not a promise of speed.
+600, 64 entries, 5 and 10 seconds are starting values. Tests, with a deterministic
+scheduler: twelve links each offering 64 entries, links arriving and leaving while
+others wait, the front link closing while budget is held, and one fast link against a
+slow retrying link.
 
 *A bounded-cache cost:* if a link's settled list has forgotten an envelope **and** the
 other phone has also forgotten that it saw it (its own caps), the envelope may be sent
@@ -588,11 +602,11 @@ stops it; only a separately reviewed distance-measuring design could.
 So:
 - the screen says "recognised", never "here", "nearby" or "connected to Ravi";
 - recognition is never used for routing, permissions, safety decisions or temporary
-  groups. It puts a name on a row, and it lets two recognised friends start a direct
-  transfer of a big attachment ([attachments](attachments-v1.md) §3). That second use
-  does change traffic after a match: a recognised link may carry a direct transfer.
-  The transfer has its own encrypted channel, and recognition is never taken as
-  evidence of distance.
+  groups. In this update it puts a name on a row and nothing more: **it starts no
+  transfer** (big attachments and their direct channel are a later update; owner, 28
+  November 2026, [attachments](attachments-v1.md) §3). A later update that adds direct
+  transfers would change traffic after a match and needs its own review. Recognition is
+  never taken as evidence of distance.
 
 ### 3.2 The recognition probe
 
@@ -688,15 +702,16 @@ operation has to be fixed. So:
   Over a cap, the phone sends a `PROBE` of filler taken from a pre-generated pool of
   random bytes, or leaves the received one unchecked, and the link stays anonymous.
   The link itself is unaffected.
-- A match changes nothing a stranger could see on that link, with one exception: two
-  recognised friends may start a direct transfer of a big attachment (§3.1).
+- A match changes nothing a stranger could see on that link. In this update it starts
+  no transfer; a later update that adds direct transfers of big attachments would be
+  the one exception and needs its own review (§3.1).
 - 30, 4 and the table size are starting values. The complete exchange is to be timed
   on real phones with 0, 1 and 128 contacts, with and without a match, before this is
   relied on.
 
 *Accepted limit:* the caps are shared and nobody is authenticated before them, so a
 stranger making many links can use them up. Friends then stay anonymous for a while,
-and big attachment transfers between them wait. Messages are not affected.
+and recognition names are delayed. Messages are not affected.
 
 ### 3.4 The link key
 
@@ -790,17 +805,18 @@ How it works:
 - While hidden, the phone still sends its `PROBE`, with all 128 slots (or that friend's
   slot) filled with random bytes, after the same 128 HMACs (§3.3). To a stranger, and
   to a friend, the probe looks exactly like one from a phone with no friends nearby.
-  One thing can hint at hiding over time: big attachments between you and that friend
-  never start, because they need recognition both ways
-  ([attachments](attachments-v1.md) §3).
+  In this update nothing else can hint at hiding, because recognition starts no
+  transfer. A later update with direct transfers of big attachments would need to say
+  how a transfer that never starts is shown ([attachments](attachments-v1.md) §3).
 - Hiding takes effect at once: the sending generation goes up first (§3.3), so no new
   link can send the withdrawn tag, then the phone changes its link ID straight away, as
   it already does every 10 to 20 minutes, which closes its links and opens new ones
   under the new rules. A friend's phone loses the name with the old link. A tag already
   sent on an old link before the switch cannot be taken back.
-- A direct transfer checks both local switches (hidden, and whether the friend is still
-  a contact) again immediately before its handshake starts and before a paused
-  transfer resumes ([attachments](attachments-v1.md) §3).
+- **Later update only:** a direct transfer would check both local switches (hidden, and
+  whether the friend is still a contact) again immediately before its handshake starts
+  and before a paused transfer resumes ([attachments](attachments-v1.md) §3). Nothing in
+  this update starts one.
 - Nothing is deleted. The keys behind recognition are made from the secret you share
   with each friend for your chats (§3.4), so deleting them would break the chats too.
   They are not needed: someone holding a friend's phone can only recognise tags you
@@ -823,7 +839,9 @@ What it does not hide:
 
 - **Frame types:** `GROUP_ENVELOPE` 9, `PROBE` 10, `OFFER` 11, `WANT` 12. `ENVELOPE`
   (4) and `ACK` gain the offer fields in §1.4. `DELIVERED` (8) is retired and not
-  reused. Today's parser refuses 9 and above; that changes in this update.
+  reused. Today's parser refuses 9 and above; that changes in this update. Frame types
+  13 and 14, which the direct transfer channel would use, are **not used** in this
+  update.
 - **Flood and stamps:** `PROBE`, `OFFER` and `WANT` carry no envelope and need no
   stamp. `PROBE` has its own caps (§3.3). `OFFER` and `WANT` count towards the link's
   existing frame budget, and `WANT` answers have a phone-wide budget (§1.4).
@@ -897,9 +915,10 @@ Part 1:
   delivering between `WANT` and data, and a restart with a reservation outstanding
   never increase the total copies; a crash at each step leaves counts no higher than
   before.
-- An envelope the other phone already has is never offered to it, for both classes; a
-  settled envelope is not offered again on that link while it is remembered (cap
-  20,000 keys, §1.4); state clears on close.
+- An envelope the other phone already has is not offered to it while that is
+  remembered, for both classes; a settled envelope is not offered again on that link
+  while it is remembered (cap 20,000 keys, §1.4); once forgotten it may be offered
+  again, a bounded-cache cost; state clears on close.
 - Paging: a link sees every eligible envelope in a store holding more than 128 settled
   ones, with envelopes added and expiring during the walk. Two envelopes with equal
   message IDs but different bytes (destination, ciphertext, class, creation time) are
@@ -936,17 +955,50 @@ Part 3:
 - Two phones connecting to each other at the same moment both recognise each other.
 - Two phones either side of a week boundary recognise each other.
 - Making and checking a probe take the same time with 1 and with 128 contacts, and
-  with and without a match; a match changes nothing on the wire except that recognised
-  friends may start a direct transfer (§3.1).
+  with and without a match; a match changes nothing on the wire, and starts no
+  transfer in this update (§3.1).
 - Over either cap, links stay anonymous and keep working.
 - Hidden (for everyone or for one friend): the `PROBE` is still 128 slots, sent at the
   same point and of the same size; the friend's phone shows "Nearby mesh node N"; "Hide
   me now" changes the link ID and closes links at once; switching back on recognises
   again with the same keys; a hidden phone still recognises friends. All four
-  combinations of A and B hiding from each other: recognition is as stated in §3.9,
-  and a direct transfer never starts when either has hidden.
+  combinations of A and B hiding from each other: recognition is as stated in §3.9.
+  (The check that a direct transfer never starts when either has hidden belongs to the
+  later update that adds direct transfers.)
 - A two-site relay test: two phones far apart, joined by two relaying phones, show each
   other as recognised. This documents §3.1; it is expected to "succeed".
+
+## Gates before integration
+
+Codex's eighth review (28 November 2026) ordered the first checks. Each is a small
+stand-alone test on the pinned versions, and each must pass before the work that
+depends on it starts. Passing a gate is not a security audit, and it does not approve
+the integrated design. Gates 1, 4 and 5 are being started now as stand-alone experiments
+in `experiments/` (owner, 28 November 2026). Other proposals refer to these numbers.
+
+| # | What it must show | What waits for it |
+| --- | --- | --- |
+| 1 | Pin `rusqlite`, SQLCipher/SQLite, the crypto provider, page size and settings. On both Android ABIs: raw-key opening, integrity checks, FULL/WAL and the commit hook work. Run the record and whole-operation estimates against the frames and peak space actually written, with cache spill, rollback, WAL reuse, checkpoints, full sessions, group state and retirement. Failed or uncertain commits are handled without pretending a hook error rolled one back | Storage, carrier and admission code. If the estimate fails, the layout is revised first |
+| 2 | On libsignal `257105c5…`, show reusable last-resort pre-keys with durable base-key state; exact replay after session loss and restart; provisional and winner selection in both identity orders; repeated discarded set-ups; lost set-up, lost reply and full-list cases; delayed losing traffic; the monthly friend-bootstrap key retention and contact/group session separation | Catch-up and group-friend work. Restart cases need gate 1's store or a clearly bounded test adapter |
+| 3 | Run the catch-up and monthly set-up capture, deletion and later-compromise experiment (initial payloads, hand-overs, ratchets, deleted history and keys, retained pre-keys kept apart). Report exactly what recorded content stays readable, and get the separate cryptographic composition review | Any claim about old messages staying unreadable. A size sample cannot stand in for it |
+| 4 | Pin and build `snow` 0.10.0 on Android. QR-derived PSK, prologue and confirmation vectors; full original and resume exchanges; Ready-responder loss and restart; bounded dispatch; malformed and maximum-size Noise messages | Encrypted QR pairing, the pairing-link queue and pair-secret installation. Independent of gates 2 and 3 |
+| 5 | Pin the STREAM support built into `chacha20poly1305` 0.10.1 (not `aead-stream`). STREAM boundary, final-flag and size vectors; outer-wrapper vectors for the new header and inbox inputs; manifest checks. Then, on gate 1's store, chunk/range ACK, reset, publication, cleanup crash tests and quota reconciliation | Small-attachment work and display. Needs no direct channel |
+| 6 | With the above passing: admission epoch and outer-budget tests, retirement and full-store tests, OFFER/WANT/reservation and deterministic waiting-line tests. Keep full group derivation as the reference and compare any shortcut against it before enabling it. Only then measure whole recognition timing, removal bursts, real radios and energy | Relying on those behaviours, or enabling the shortcut. Radio, timing and energy claims need real devices |
+
+
+**First run of gates 1, 4 and 5** (28 November 2026; desktop Windows and the x86_64
+Android 9 emulator; not a real phone; arm64 built but not run). *Gate 1*
+(`experiments/sqlcipher-store/`): raw key, integrity check, WAL, FULL and the hook work;
+56 of 56 estimate runs passed on seven cases. Still needed: history rows, sender-key and
+group state, retirement, full session plus history, WAL reuse, LibTomCrypt speed, real
+flash and power loss. *Gate 4* (`experiments/noise-pairing/`): original and resume
+exchanges, wrong `psk` or prologue, truncated and flipped messages, and the 65,535-byte
+maximum all behave as written. Still needed: signed confirmations, Ready-responder loss
+and restart, bounded dispatch and `PAIR_FIND`. *Gate 5* (`experiments/stream-attachments/`):
+size table, final-flag and manifest checks pass, and the built-in STREAM and `aead-stream`
+give identical bytes. Still needed: outer-wrapper vectors, chunk and range ACK, crash
+tests and quota reconciliation, which need gate 1's store. Gates 2, 3 and 6 have not
+been started. None of this is an audit.
 
 ## Order of work
 

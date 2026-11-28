@@ -1,6 +1,6 @@
 # Proposal: local storage for your own messages, keys and groups
 
-**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+**Status: draft for review; do not implement.** Revised after Codex's fifth, sixth, seventh and eighth reviews of the
 v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this changes how keys and
 messages are encrypted and saved on the phone, so it must be reviewed before any code is
 written. It ships in the same update as [local mesh v3.1](local-mesh-v3.1-group-envelopes.md)
@@ -57,7 +57,12 @@ test build, but it cannot carry real use:
 
 A single **SQLCipher** database, `messaging/yap-store-v1.db` in `noBackupFilesDir`,
 opened by the Rust endpoint through `rusqlite` with its bundled SQLCipher build (both
-pinned, as libsignal is). Decided (owner, 28 November 2026): SQLCipher encrypts every
+pinned, as libsignal is). **Crypto provider (planner decision, 28 November 2026):**
+LibTomCrypt 1.18.2, built as in `experiments/sqlcipher-store/`. SQLCipher supports it,
+and it builds on the Windows development machine and in Linux CI without Perl (the
+stock OpenSSL provider did not build on the Windows machine). Its speed is
+unmeasured and goes into gate 6's measurements; gate 1's results apply to that
+provider only, and a change of provider means rerunning gate 1. Decided (owner, 28 November 2026): SQLCipher encrypts every
 database page, so a seized file shows only one encrypted file of a certain size, not
 how many messages each chat has. An earlier draft used redb with per-record encryption,
 which left per-chat counts and sizes visible.
@@ -152,7 +157,12 @@ Each endpoint operation is **one write transaction**:
    send, an acknowledgement, or a screen update.
 
 Any error aborts the transaction and nothing changes, which keeps today's rule that a
-failed operation never half-advances a session. A crash before the commit leaves the
+failed operation never half-advances a session. **One exception, by design:**
+admission charges (the set-up allowance and phone-wide set-up limit in group
+encryption §3.11, the work gate and shares in §5, and reply-rate counters) are
+committed in their own small transaction **before** the operation starts, so a
+failed operation still uses up its charge. They hold only counters, never keys,
+sessions or messages. A crash before the commit leaves the
 store as it was; after the commit, the work is done and any resend is an exact repeat
 that the received records already handle.
 
@@ -183,11 +193,92 @@ counted before writing**, with room kept back for what must never be refused.
   | 1 GB + 512 MB or more | everything, including the carrier store |
   | 1 GB + 256 MB or more | everything except new carried envelopes |
   | 1 GB + 32 MB or more | only essentials (below), shrinking operations, checkpoints and space reclamation |
-  | less | only checkpoints, space reclamation and deleting files |
+  | less | only checkpoints, space reclamation, cleanup batches and deleting files (see the page allowances below) |
 
-  Before a transaction starts, its new bytes, doubled for the write-ahead log, must fit
-  between the free space and its tier's line; an ordinary transaction adds at most 4 MB
-  and an attachment chunk at most 64 KiB, so one write cannot jump a tier. Below the
+  **Physical size of a write** (sixth review finding 4). What a transaction costs on
+  disk is the pages it changes, not the bytes it adds: an update or a deletion (with
+  `secure_delete` on) can change many pages while adding nothing. So every write
+  transaction has a **page allowance** by class.
+
+  **How the allowance is enforced** (seventh review finding 5). Watching the
+  write-ahead log during a transaction does not work: SQLite can keep changed pages in
+  its cache and write them only at commit, too late to roll back. So the bound is
+  worked out **before** the transaction starts, from what it will touch: the estimate
+  is the sum of the maximum encoded sizes of the rows it will write or delete, each
+  rounded up to whole pages of the pinned page size (usable bytes per page, not 4,096: SQLCipher reserves 80 bytes of each page, so 4,016 of 4,096 are usable), doubled, plus 16 pages for
+  indexes and accounting.
+
+  **Record and operation contract** (eighth review finding 3).
+  - *Every record type has an encoded maximum.* Known ones: a session 512 KiB, an
+    envelope 64 KiB, a group event 8 KiB. The rest (history row, sender-key state,
+    pending and cached pieces, friend requests, admission counters, each index) get
+    their maxima written into §3's table as the **first output of gate 1** ([gates before integration](local-mesh-v3.1-group-envelopes.md#gates-before-integration))
+    below, before any code depends on them. Group state is stored as **one row per
+    member and one row per open proposal, election or warning**, each at most 8 KiB,
+    so a governance step changes a bounded number of rows; if any derived group state
+    cannot be split that way within the bound, gate 1 fails and the layout is
+    redesigned first.
+  - *Atomic operations only refuse, never split.* Any operation that runs libsignal
+    (decrypt, encrypt, a set-up) commits its session change, history, receipt and
+    output together or not at all. If its estimate is over its class allowance, it is
+    refused, and gate 1 must show that no valid operation is intrinsically oversized.
+  - *Two-stage operations, with a saved input.* Only two kinds may be split, each
+    with a durable intent: **cleanup** (as in §7), and **a group piece carrying inner
+    contact material** (friend bootstrap): stage 1 decrypts the group piece, commits
+    the group session change and saves the inner bytes as a pending input in the same
+    transaction; stage 2 processes those saved bytes against the contact session and
+    deletes the pending input in its own commit. A restart repeats stage 2 from the
+    saved input. The pending input counts against the endpoint quota until stage 2
+    commits.
+  - *Retirement is bounded by construction:* the first transaction (§7) only sets the
+    mark, raises the generation and deletes a bounded number of small secrets; outbox
+    entries are cancelled **logically** by the mark (unsent reservations released,
+    possibly-sent ones treated as spent, as in mesh v3.1 §1.4), not rewritten one by
+    one.
+
+  **Gate 1's measurement** (eighth review finding 4). Whether the estimates really
+  bound the pages written is checked on the pinned SQLCipher build before dependent
+  work, in a test harness, never in the app's own commit path:
+  - each test operation runs on its own connection right after a truncating
+    checkpoint, so the write-ahead log starts empty and the frame count SQLite's
+    write-ahead-log hook reports after the commit is exactly what that transaction
+    appended; the harness also checks that the hook was called for every
+    **committed** transaction (a committed test where it was not called fails). The hook
+    never fires for a rolled-back transaction, so for those the check is the file
+    lengths below, not the hook. Installing the hook replaces SQLite's automatic
+    checkpoint, so the app runs its own checkpoints (as this section already says) and
+    the harness checks that none ran in between;
+  - peak space is measured too: the sizes of the database, log and any temporary files
+    are sampled after every statement and at commit, with cache spill both on and
+    off, and for rolled-back transactions. Peak space is taken from **file lengths**,
+    not from the hook's frame count: with a small cache and spill on, a rolled-back
+    transaction left 251 frames (about 1 MB) in the log. The pinned build uses no
+    temporary files (`TEMP_STORE` 3), so that figure should always read 0;
+  - **pass condition:** for every operation type at its maximum record sizes, frames
+    appended and peak extra space are at most its estimate; any excess fails the gate
+    and the layout or estimate is revised first;
+  - the hook always returns success: it is an observer, and a commit it reports has
+    already happened.
+  - **First run** (28 November 2026, `experiments/sqlcipher-store/`, desktop and
+    Android x86_64 emulator, Android 9; not a real phone): 56 of 56 measured runs
+    passed with about 2x headroom, on **seven cases only**. Not yet tested, and still
+    gate 1 work: history rows, sender-key state, group state, retirement, and a full
+    session plus history, WAL reuse across several commits, and real flash. This is a
+    feasibility result, not an audit.
+
+  | Class | Changed pages at most | Allowed down to |
+  | --- | --- | --- |
+  | Ordinary (messages, carried envelopes, state) | 1,024 (4 MiB) | its tier line above |
+  | Essential (receipts, key changes, governance, pairing, accounting) | 320 (1.25 MiB, enough to rewrite one maximum-size session) | 1 GB + 32 MB |
+  | Cleanup batch (deleting retired data, marking files to delete) | 1,024 | 64 MB free in all |
+  | Checkpoint and reclamation | `incremental_vacuum(256)` steps | 64 MB free in all |
+
+  Before a transaction starts, twice its page allowance must fit between the real free
+  space and its line, so one write cannot jump a tier. An attachment chunk adds at most
+  64 KiB. Both stores check the same real free space at the start of every
+  transaction, and the carrier stops first because its line is highest. Cleanup and
+  reclamation free space, so they may run below the 1 GB floor, down to 64 MB free;
+  below that Yap writes nothing and shows that the phone is full. Below the
   second line the app shows "Phone storage almost full". Another app filling the phone
   has the same effect. **No floor can guarantee progress** if another app takes all the
   space: Yap then stops writing, keeps what it has committed, and says so.
@@ -215,14 +306,73 @@ counted before writing**, with room kept back for what must never be refused.
   are always allowed, within the physical floor's tiers.
 - **One admission order for incoming messages** (fifth review finding 8). Whether
   something is an essential is known only after decryption, so:
-  1. **Work gate, before decryption:** at most 2,000 envelopes an hour from one contact
-     or group sender (known from the label), and 6,000 an hour in total, go on to be
-     decrypted. Over this, the envelope is not processed.
+  1. **Work gate, before decryption** (sixth review finding 3; owner, 28 November
+     2026: everyone gets a guaranteed share). Each contact and each group sender
+     has a **guaranteed share of 60 decryptions an hour** that no other contact can use
+     up (see the stated limits below for strangers and group members): these do not
+     count against the phone-wide gate. Beyond its share, a sender may
+     use the **shared gate**: at most 2,000 an hour per sender and 6,000 an hour in
+     total. Over both, the envelope is not processed. A sender's own share is used by
+     whatever it sends first, so a contact who floods can delay only its own receipts
+     and key changes.
+
+     **How shares are set** (seventh review finding 3). Shares belong to identities, so
+     one person who is a contact and in several groups has one share. Each **working-time
+     hour** is an epoch. At its start, the phone counts the eligible identities (its
+     contacts and the current members of its groups) and gives each the same whole
+     number of decryptions: 60, or `floor(12,000 / eligible)` if that is smaller. So
+     the shares are fixed in advance and together never exceed 12,000. With no eligible
+     identities nothing is allocated. **Over 12,000 identities** (owner, 28 November
+     2026, eighth review finding 1: absurd in practice, so they take turns): the
+     identities are put in a fixed order (by identity key) and each hour the next
+     12,000 in that order get a share of 1, carrying on from where the last hour
+     stopped, so every identity gets one at least once every `ceil(eligible / 12,000)`
+     hours; the rest may use only the shared gate that hour. The epoch's eligible set,
+     its position in the order and the spent counts are saved per epoch, so a restart
+     or a clock moved back into an epoch already visited reuses its accounting and
+     never mints it again.
+     Someone who becomes eligible during the hour gets a share from the next hour; until
+     then they may use only the shared gate. Nothing is taken back from a share already
+     used.
+
+     **What a share is charged for** (seventh review finding 4). A label is visible to
+     anyone and proves nothing, so the share is charged only once the **outer layer has
+     opened**, which a stranger who copied the label cannot do, and an unknown label
+     gets no share at all. For a contact the outer key comes from the pair secret, so
+     only that contact can spend its share.
+
+     **The outer-attempt order** (eighth review finding 2). The unit is **one outer
+     AEAD trial**: one candidate key tried on one outer layer (a batch can need up to
+     32, local mesh and group encryption §3.11). In order: (a) label lookup, which is
+     free; (b) before each trial, one unit is taken from a phone-wide **outer budget of
+     6,000 trials an hour**, whether the trial then succeeds or fails, and with no
+     refund; (c) if the budget is used up, no trial is made, the envelope is not
+     handled and gets no mesh `ACK`, so honest senders retry next hour; (d) a trial
+     that opens attributes the envelope to the identity it claims, and only then step
+     1's share or shared gate is charged for the inner decryption; (e) outer layers
+     opened before the mesh `ACK` are kept opened for the worker and never tried or
+     charged twice. The outer budget is counted in memory, saved at most once a minute
+     and at shutdown, so a crash can forget at most a minute of it (stated, to avoid a
+     write per trial).
+
+     *Stated limits, in full:* (1) a stranger who copies recognised labels can use up
+     the outer budget and so delay **every** sender's classification on this phone
+     until the next hour; the mesh's existing intake limits and effort stamps bound
+     how fast, but this is a denial of service the design accepts, like sustained
+     flooding. (2) For group traffic the outer layer proves only knowledge of an inbox
+     key, which every member (and a removed member, for fallback inboxes) has, so a
+     current or former group member can spend another member's share by naming them as
+     sender, until libsignal's inner check fails, for as long as the attack goes on.
+     Because shares belong to identities, that also uses up the share of a person who
+     is both that member and one of your contacts. Neither is a way in: inner
+     authentication still decides what is accepted.
   2. **Decrypt and authenticate** in memory, without committing anything.
   3. **Classify.** An ordinary message counts against the ordinary rates (below): 1,000
      an hour per sender, 3,000 in total. An essential counts against its own: 1,000 an
-     hour per sender, 3,000 in total, and may use the 64 MB reserve. So a receipt or
-     key change still gets through while the same contact floods ordinary messages.
+     hour per sender, 3,000 in total, and may use the 64 MB reserve. So once a receipt
+     or key change has been decrypted, a full ordinary allowance never blocks it; and
+     step 1's guaranteed share means other **contacts'** floods cannot stop it being
+     decrypted, within the two stated limits above.
   4. **Commit** only if the message is within its rate and its storage tier allows it.
      Otherwise nothing is committed (the session change included), so the sender's
      retry is decrypted afresh later.
@@ -233,17 +383,22 @@ counted before writing**, with room kept back for what must never be refused.
   sender clear its outbox). The mesh `ACK` only ever means "this phone has handled the
   envelope" (local mesh v3.1 §1.3) and may already have been sent, by this phone or an
   earlier hop; a refusal never claims otherwise. Tests: a receipt and a justified key
-  change straight after a contact has used up its ordinary rate, then again with the
-  2 GB limit reached, then with real free space in the third tier.
+  change from one contact after three other contacts have each sent 2,060 ordinary
+  messages in the hour (each uses its 60 guaranteed and 2,000 shared, so the three
+  together use exactly the 6,000 shared gate; seventh review finding 8); the same contact's receipt after it
+  has itself sent 1,000 and then 2,000; and each again with the 2 GB limit reached and
+  with real free space in the third tier.
 - **Each chat's share** at all times, not only near the limit: a chat (contact or
   group) may use at most the larger of **10%** of the limit and an equal share among
   chats active in the last 30 days. A chat at its share has new incoming messages
   refused (not acknowledged, so the sender keeps them), with a notice naming it and
   offering to clear history or raise the limit. Other chats are unaffected until the
   whole limit is reached; then every chat over its equal share is refused first.
-- **Rates:** at most 1,000 incoming messages an hour from one contact or one group
-  sender, at most 3,000 an hour in total, and at most 1,000 an hour created by this
-  phone. Over these, envelopes are not acknowledged, so honest senders retry.
+- **Rates:** at most 1,000 incoming ordinary messages an hour from one contact or one
+  group sender, at most 3,000 an hour in total, and at most 1,000 an hour created by
+  this phone. Essentials have their own budget and the guaranteed share in the
+  admission order above; these ordinary rates never apply to them. Over these,
+  envelopes are not acknowledged, so honest senders retry.
 - **Bounded tables:** outbox and received rows are bytes in the shared count and
   expire with their envelopes; seen last copies are 48 bytes each and expire after 24
   hours (at most 200,000, about 10 MB); pending group pieces keep only the newest per
@@ -275,11 +430,36 @@ a SuperAdmin made it). `group_state` keeps the state at the current heads.
 ### 7. Deleting
 
 - **Clear history** deletes that chat's history rows and its attachments.
-- **Removing a contact** deletes its contact record, session, pair secrets, history
-  and outbox entries in one transaction, and marks its attachment files for deletion
-  (§7a).
-- **Leaving a group** deletes its log, state, sessions, pre-keys, keys, inboxes,
-  pending pieces, history and attachments the same way.
+- **Removing a contact** happens in two parts (sixth review finding 4), because a
+  single transaction for hundreds of megabytes of history cannot fit a page allowance
+  (§5):
+  1. **Retire, in one small essential transaction** (seventh review finding 6: sized
+     so it always fits): delete its pair secrets and link keys (a few hundred bytes),
+     cancel its outbox entries, raise the recognition sending generation (mesh v3.1
+     §3.3) and mark the contact "removing". From this commit the contact cannot send,
+     receive or be recognised: every read, send, receive, queued worker job, attachment
+     step and label table checks the mark, after a restart too. It vanishes from every
+     screen.
+  2. **Clean up, in batches:** a background job deletes, in this order, its session
+     (up to 512 KiB, one batch of its own), then its history rows, and marks its
+     attachment files for deletion (§7a), each batch one cleanup transaction (§5),
+     resuming after a restart, until nothing is left; then the contact record itself is
+     deleted. Until then the session and history are unusable through the app but
+     still in the encrypted database. The first batch normally runs straight after
+     retirement. If space is too low even for cleanup, the job pauses and the app says
+     so; the stated cost is that the session stays stored, unused, until it can run.
+- **Leaving a group** works the same way: one small transaction deletes this phone's
+  own inbox private keys (a few, each 32 bytes), raises the generation and marks the
+  group "leaving", which stops every use of the group's keys at once; then its
+  sender-key states and skipped keys, sessions (each a batch of its own), pre-keys,
+  log, state, pending pieces, history and attachments are deleted in cleanup batches,
+  with the same stated cost: until cleanup reaches them they stay in the encrypted
+  database, unusable by the app but readable to anyone who unlocks the store.
+  Tests: a contact with a maximum-size session, leaving a full 128-member group,
+  pending outbox reservations, and a restart while cleanup is paused.
+- Clearing a chat's history uses the same cleanup batches.
+- Tests: removing a contact with a large history at each tier line, a restart in the
+  middle of cleanup, and cleanup pausing at 64 MB free.
 - After deletions, freed pages are overwritten (`secure_delete`) and returned to the
   phone a few at a time by incremental reclamation (§5). A full `VACUUM` is never run.
 - Deleted records may survive on flash, and SQLCipher pages written before a deletion
@@ -300,9 +480,25 @@ Files cannot be in a database transaction, so the order is fixed:
   with the reference: **Receiving** (a staging file, with saved received ranges),
   **Checking** (all bytes present, full validation running), **Published** (a
   finished file, renamed to its final name as under "Adding") and **Deleting** (as
-  under "Deleting"). Only Receiving attachments hold a reservation that is not yet a
-  file, so reservations are recounted from Receiving rows only and a finished file is
-  never charged twice.
+  under "Deleting"), plus two short intent states, **Resetting** and **Publishing**
+  (below; sixth review finding 5).
+- **One charge per attachment.** From the moment its manifest is accepted until its
+  row is gone, an attachment is charged its full encrypted size exactly once, whatever
+  its state: as a reservation while Receiving, Resetting, Checking or Publishing, and
+  as a file once Published. At start, the total is recounted from every row that is not
+  gone, so nothing is charged twice or dropped in between.
+- **Resetting after failed validation,** in this order: (1) commit the row as
+  Resetting, with all ranges cleared and the failure count raised; (2) empty the
+  staging file and sync it; (3) commit it as Receiving. Ranges are cleared before the
+  file is touched, so stale bytes can never make a reset transfer look complete. At
+  start, a Resetting row has its file emptied again and moves to Receiving.
+- **Publishing after successful validation,** in this order: (1) commit the row as
+  Publishing, with the final random name chosen; (2) rename the staging file to that
+  name and sync the folder; (3) commit it as Published. At start, a Publishing row is
+  finished: if the final file exists, commit Published; if only the staging file
+  exists, do the rename and continue; if neither does, go back to Receiving with a new
+  empty staging file and no ranges. The start-up sweep never deletes a file named by a
+  Receiving, Resetting, Checking, Publishing or Deleting row.
 - **Writing into a staging file:** write the bytes, sync the file, and only then commit
   the range as received. A crash in between loses at most a range that is not yet
   recorded, which is simply received again. A range is acknowledged to the sender only
@@ -310,9 +506,11 @@ Files cannot be in a database transaction, so the order is fixed:
 - **At every start:** files with no reference are deleted; for **Receiving**, a missing
   staging file is recreated empty and its ranges reset (attachments §4), and an existing
   one keeps its recorded ranges; **Checking** goes back to Receiving and is checked
-  again; a **Published** reference whose file is missing is shown as "Attachment
-  missing"; **Deleting** is finished. Nothing is sent or shown until this check has
-  run.
+  again; **Resetting** and **Publishing** are finished as above; a **Published**
+  reference whose file is missing is shown as "Attachment missing"; **Deleting** is
+  finished. Nothing is sent or shown until this check has run.
+- Tests: power loss before and after each step of resetting and publishing, two failed
+  validations in a row, and the charged total checked after every restart.
 
 ### 8. The clock check
 
@@ -324,7 +522,7 @@ contacts could lie together).
 One **working time** is used by everything: the endpoint, the carrier store, pairing,
 groups, labels, weekly secrets and attachments.
 
-1. **It never goes backwards, and it keeps ticking.** Each time the working time is
+1. **It never goes backwards (one accepted exception, rule 5), and it keeps ticking.** Each time the working time is
    read, it is worked out in this order, from the **last working time returned** (not
    the value at start) and the phone's elapsed-time stopwatch
    (`SystemClock.elapsedRealtime`):
@@ -337,7 +535,8 @@ groups, labels, weekly secrets and attachments.
       next commit.
 
    So once time has moved forward, setting the clock back, with or without a restart,
-   never brings it back. The app shows "Your phone's clock has gone back; Yap is using
+   never brings it back (except for the 1-hour carrier-recreation exception in rule 5).
+   The app shows "Your phone's clock has gone back; Yap is using
    the time it last knew". After a reboot the stopwatch restarts, so the saved value is
    the floor and the clock is compared with it as above.
 2. **Big forward jumps wait for you.** "Your phone's clock jumped forward by N days. Is
@@ -348,7 +547,8 @@ groups, labels, weekly secrets and attachments.
    still far ahead after an hour. Jumps up to 2 days, such as a phone that was off over
    a weekend, are taken without asking; even those can expire a day's undelivered mail,
    which is the same as if the time had really passed.
-   **A "Yes" given by mistake cannot be undone,** because working time never goes back:
+   **A "Yes" given by mistake cannot be undone,** because working time never goes back (apart from the one accepted exception below,
+   at most 1 hour):
    messages that expired stay expired and deleted secrets stay deleted. The prompt says
    so. The only way back is to re-pair the affected contacts. Re-pairing does not change
    the phone's working time, so the prompt must not suggest that it does: it says only
@@ -370,15 +570,27 @@ groups, labels, weekly secrets and attachments.
      store asks it and never works time out itself.
    - **The durable floor is the last committed value.** A value returned just before
      power loss, but not yet committed, may not survive.
+   - **The endpoint store always leads** (sixth review finding 8). The authority never
+     hands anyone, the carrier included, a working time more than **1 hour** past the
+     floor last committed in the endpoint store; before it would, it commits a new
+     endpoint floor first (a small essential write, about once an hour while Yap runs).
+     So the endpoint holds a committed floor within 1 hour of any time the carrier
+     ever used.
    - **Recreating an empty carrier store** takes its floor from the endpoint store and
-     never resets it.
+     never resets it. If the carrier had committed a later time, working time can
+     therefore go back by at most 1 hour after such a recreation. That is the one
+     accepted exception to "never goes back": it can delay an expiry by up to an hour,
+     and cannot undo a weekly secret step, because those are committed in the endpoint
+     store. Test: a carrier-only advance, then the carrier key lost and the store
+     recreated.
    - **Arithmetic saturates** rather than overflowing.
    - **If a store cannot be read,** nothing is expired, no labels are generated and the
      carrier is not pruned until both stores are open or the carrier has been recreated.
 
 **Tests:** an advance of under 2 days followed by setting the clock back in the same
 run; a confirmed and a refused larger jump; a reboot; a crash between the two stores'
-commits.
+commits; a carrier-only advance followed by the carrier key lost and the store
+recreated, where working time may go back by at most 1 hour and no further.
 
 *Still open for review:* a restored older copy of the whole store can bring back an
 older working time and older secrets (rollback); this rule does not solve that.
@@ -425,7 +637,9 @@ contact is re-paired.
 - Power loss at every step of a receive, a send, a receipt, pairing and a group event:
   after restart the store holds either the whole change or none of it, and no session
   has moved forward without its message being saved.
-- A failed decrypt leaves every record unchanged.
+- A failed decrypt leaves every record unchanged except its admission charge, which was
+  committed before it started; a restart straight after the charge, and straight after
+  the refusal, keeps the charge.
 - 100,000 history messages across 128 contacts: opening the app, receiving one message
   and scrolling history each take the same time as with 100 messages (measured on a
   mid-range phone).
@@ -434,13 +648,17 @@ contact is re-paired.
   go through with the store full.
 - Every chat at its share at once: the reserve still accepts receipts, key changes and
   governance events.
-- Removing a contact leaves no record for it; clearing history removes its rows and
-  attachments; a crash at each step of §7a leaves no orphan file and no dangling
-  reference after the next start.
+- Removing a contact: at retirement, and again after a restart, the contact is denied
+  every use (read, send, receive, queued jobs, attachment steps, labels) and a durable
+  cleanup mark exists; after cleanup completes, no record for it, no orphan file and no
+  dangling reference remains. Clearing history removes its rows and attachments the
+  same way. A crash at each step of §7a leaves no orphan file and no dangling
+  reference after the next start, except what a pending cleanup mark still names.
 - A changed page fails when that page is read (opening alone does not check every page).
   A deliberate whole-file check runs SQLCipher's `PRAGMA cipher_integrity_check` at
-  start after an unclean shutdown and on demand. Not confirmed: the pragma name is from
-  memory of SQLCipher's documentation and must be checked against the pinned version.
+  start after an unclean shutdown and on demand. The pragma is confirmed in SQLCipher's
+  API documentation (added in version 4.2.0, sixth review); the Android SQLCipher
+  version is not yet pinned, so it must still be checked against the pinned version.
 - Each first-start recovery case in §2 behaves as stated; a missing or wrong wrapped
   store key never creates a new identity over existing data.
 - Upgrade from 0.2 deletes every old file, alias, preference and the old carrier store.

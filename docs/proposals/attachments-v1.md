@@ -1,6 +1,6 @@
 # Proposal: photos, voice notes and files
 
-**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+**Status: draft for review; do not implement.** Revised after Codex's fifth, sixth, seventh and eighth reviews of the
 v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this adds new encrypted
 content and new frames, so it must be reviewed before any code is written. It ships in
 the same update as [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) and
@@ -13,7 +13,17 @@ the same update as [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) and
 - Photos, voice notes and files are all supported.
 - **Small attachments travel through the mesh, big ones only directly.** A compressed
   photo or a short voice note is carried by strangers like a message. Anything bigger
-  only moves when the two phones are linked to each other.
+  only moves when the two phones are linked to each other. (Big ones are a later
+  update; see the next decision.)
+- **Big attachments move to a later update** (owner, 28 November 2026, after the sixth
+  review found that only big attachments depend on the still unwritten direct
+  channel). This update sends only small attachments (§2): photos, voice notes up to
+  60 seconds and files whose encrypted size is at most 262,144 bytes. Choosing a
+  bigger file shows "Big files are coming in a later update", and nothing is sent.
+  §3 stays here as the plan for that later update, is **not part of this update**
+  and is not ready for review: its channel and `FILE_*` encodings are unwritten.
+  Recognition (local mesh v3.1 Part 3) starts no direct transfer in this update, and
+  the frame types 13 and 14 are not used.
 
 ## Problem
 
@@ -29,8 +39,10 @@ attachments today, and no way to encrypt them.
 
 Each attachment gets a fresh random 32-byte **file key** and a fresh random 19-byte
 **stream nonce**. The file is encrypted with RustCrypto's STREAM construction,
-`StreamBE32` over XChaCha20-Poly1305 (the `aead-stream` crate, pinned in the same
-crate family as the outer layer's `chacha20poly1305`). The exact cut:
+`StreamBE32` over XChaCha20-Poly1305 (the STREAM support built into the pinned `chacha20poly1305 = 0.10.1`, with `aead`
+0.5, the same crate the outer layer already uses; not the separate `aead-stream` 0.6
+crate, which needs `chacha20poly1305` 0.11. The experiment showed both give identical
+bytes). The exact cut:
 - For a file of `n` plaintext bytes, the segment count is `max(1, ceil(n / 65,536))`.
   Every segment except the last holds exactly 65,536 bytes; the last holds the rest,
   from 1 to 65,536 bytes. An empty file is one empty last segment. A file of exactly
@@ -52,7 +64,8 @@ The **message** that announces it is an ordinary end-to-end encrypted text messa
   segment count and the SHA-256 of the encrypted file;
 - for photos, a thumbnail of at most 4 KB; for voice notes, the length; for files, the
   name (at most 255 bytes) and type;
-- whether it is small (mesh) or big (direct).
+- whether it is small (mesh) or big (direct; big manifests are refused in this update,
+  see "Owner decisions").
 
 Nobody but the recipients learns any of this. Carriers and links only ever see
 encrypted bytes.
@@ -92,8 +105,8 @@ that does not match the hash in the manifest is refused, whoever sent it.
   sender's label scope with the same attachment ID are used; the rest expire. A held
   piece's claimed total is not trusted: the manifest's size decides.
 - Once the staging file holds every byte, the manifest checks above run (local storage
-  §7a, Checking). **If they fail,** the staging file is emptied and its received ranges
-  reset in one step, the reservation is kept, and the attachment receives again from
+  §7a, Checking). **If they fail,** the attachment goes through Resetting (local
+  storage §7a: ranges cleared first, then the file emptied), the reservation is kept, and the attachment receives again from
   any copies still arriving. A second failure for the same attachment ends it: the file
   is deleted, the reservation released, and it shows "Couldn't receive this
   attachment".
@@ -109,6 +122,9 @@ that does not match the hash in the manifest is refused, whoever sent it.
   per nearby phone.
 
 ### 3. Big attachments: directly between the two phones
+
+**Not in this update** (owner, 28 November 2026). Kept as the plan for a later update;
+see "Owner decisions".
 
 - **What counts as big:** anything over 256 KB, up to **100 MB**, including full-size
   photos and any file.
@@ -169,16 +185,18 @@ fill the carrier store's 64 MiB far sooner than text does. The limit stays at 64
 until the simulator measures bytes (it does not yet); raising it would not raise the
 native ingress limit of 1 MiB a minute or reduce last-copy radio traffic.
 
-**Admission, before anything is written** (applies to both kinds):
+**Admission, before anything is written** (in this update, small attachments only; big ones are refused, below):
 - Space for an attachment's full encrypted size is **reserved** against the
   attachments limit when its manifest is accepted, before any piece or chunk is
   written. No reservation, no transfer.
 - A manifest larger than the limits in §6, or for which there is no space, is shown as
   "Too big to receive" and nothing is reserved.
 - At most 8 incomplete attachments per chat and 64 per phone. Incomplete small
-  attachments are deleted when their envelopes expire; incomplete big ones when their
-  sender's announcing message is 7 days old.
-- At most 2 big transfers run at once, each with one stream.
+  attachments are deleted when their envelopes expire. *Later update:* incomplete big
+  ones are deleted when their sender's announcing message is 7 days old.
+- *Later update:* at most 2 big transfers run at once, each with one stream.
+  In this update a manifest marked big is refused with "Big files are coming in a later
+  update" and nothing is reserved.
 - **Before any decoder runs,** declared and actual sizes are checked against fixed
   limits: incoming images at most 50 megapixels and 16,384 pixels a side; thumbnails at
   most 4 KB and 256 pixels a side; in-app audio playback only for voice notes, at most
@@ -194,7 +212,10 @@ native ingress limit of 1 MiB a minute or reduce last-copy radio traffic.
   with no accepted manifest is deleted; a Receiving attachment with no staging file
   gets a new empty one with its ranges reset; one whose file exists keeps its recorded
   ranges, which were saved only after their bytes were synced; Checking goes back to
-  Receiving; reservations are recounted from Receiving attachments only.
+  Receiving; Resetting and Publishing are finished as local storage §7a says; every
+  attachment is charged exactly once until its row is gone, recounted from all rows
+  that are not gone. (Fixed in the sixth-review response: the earlier "from Receiving
+  attachments only" contradicted local storage §7a.)
 - Tests: power loss after a chunk is written but before its range is saved, and after
   the range is saved; a partial file with recorded ranges; failed final validation,
   then a retry, then a second failure; a crash during publication and during deletion;
@@ -213,59 +234,70 @@ native ingress limit of 1 MiB a minute or reduce last-copy radio traffic.
 ### 6. Limits
 
 - The **encrypted size** is the limit that counts, checked when the manifest arrives:
-  at most 262,144 bytes for a small attachment and 104,857,600 bytes for a big one
-  (starting values). The phone preparing a small attachment makes the plaintext small
+  at most 262,144 bytes for a small attachment (starting value). The 104,857,600-byte
+  ceiling for a big one is the plan for the later update and is not used in this one. The phone preparing a small attachment makes the plaintext small
   enough that, with 16 bytes per segment, the encrypted file fits.
 - Each piece counts as one message towards the per-contact rate in local storage §5.
-- Waiting outgoing big transfers count against the attachments limit too: a phone
-  keeps at most 20 waiting per contact **and** never more than the space left; older
-  ones show "Not sent yet" until the user resends.
+- *Later update:* waiting outgoing big transfers count against the attachments limit
+  too: a phone keeps at most 20 waiting per contact **and** never more than the space
+  left; older ones show "Not sent yet" until the user resends. In this update nothing
+  big is queued.
 - Filenames are shown with control and path characters removed, and a file is only
   ever opened by an app the user picks.
 
 ## What changes elsewhere
 
-- **Mesh v3.1:** pieces use the normal envelope classes; two new frame types for the
-  direct channel, `DIRECT_HANDSHAKE` 13 and `DIRECT_DATA` 14 (encrypted pairing uses 17
-  and 18); recognition now also gates direct transfers (v3.1 §3.1).
+- **Mesh v3.1:** pieces use the normal envelope classes. *Later update:* two new frame
+  types for the direct channel, `DIRECT_HANDSHAKE` 13 and `DIRECT_DATA` 14 (encrypted
+  pairing uses 17 and 18), and recognition also gating direct transfers (v3.1 §3.1).
+  Neither happens in this update.
 - **Local storage:** the `history` table holds attachment references; a new attachments
   folder and space limit.
-- **Screens:** attach and record buttons, photo preview, progress and status for big
-  transfers. Made on the UI branch once the data exists.
+- **Screens:** attach and record buttons, photo preview, progress and status for small
+  attachments, and the "Big files are coming in a later update" message. Made on the UI branch once the data exists.
 
 ## Open questions for the reviewer
 
 1. `StreamBE32` over XChaCha20-Poly1305 with 64 KiB segments, and the manifest checks
    (§1).
-2. The direct channel: `NNpsk0` keyed from `linkKey`, the week rule and resuming (§3).
+2. *Later update, not for review now:* the direct channel: `NNpsk0` keyed from
+   `linkKey`, the week rule and resuming (§3). Its frames are unwritten.
 3. Linking pieces through their shared label and sizes (§2).
 4. The admission and cleanup rules (§4).
-5. The starting values: 256 KB, 60 seconds, 100 MB, 5 GB, 8 and 64 incomplete, 2
-   transfers.
+5. The starting values: 256 KB, 60 seconds, 5 GB, 8 and 64 incomplete. (100 MB and
+   2 transfers belong to the later update.)
 
 ## Test plan
 
 - A photo with GPS EXIF arrives with no metadata.
 - Files of 0, 1, 65,535, 65,536 and 65,537 bytes encrypt to the stated sizes and
-  segment counts and open; a file cut at a segment boundary fails; both size ceilings
-  are enforced on the encrypted size; a crash after a manifest but before the first
+  segment counts and open; a file cut at a segment boundary fails; the small ceiling
+  (262,144 encrypted bytes) is enforced on the encrypted size, 262,144 is accepted,
+  262,145 is not, and every big manifest is refused with nothing reserved; a crash after a manifest but before the first
   chunk still lets it finish; an oversized thumbnail or image declaration is refused
   before decoding; pieces before their manifest stay in memory and expire.
 - A 262,144-byte encrypted attachment in 5 pieces arrives through two carriers; one missing piece leaves
   it "not received" after expiry; a changed, swapped or reordered chunk is refused.
-- A 100 MB file moves directly, survives the link dropping three times, and resumes
-  from the last confirmed chunk.
-- A listener on the link sees no attachment ID, name, type or plaintext.
-- With recognition hidden, big transfers wait and say why.
-- A group of 10 with a connected pairing graph: every member gets a big file.
+- A file over 262,144 encrypted bytes is refused at the picker with "Big files are
+  coming in a later update", and a received manifest marked big is refused with
+  nothing reserved.
+- A listener on a link sees no attachment ID, name, type or plaintext.
+- Recognition (shown or hidden) starts no transfer in this update.
 - Clearing a chat deletes its attachment files.
 - A crafted image or audio file over the size or pixel limits is refused before
   decoding.
+
+**Later update tests** (not part of this update; eighth review finding 6):
+- The 100 MiB (104,857,600-byte) ceiling and its boundary on the encrypted size.
+- A 100 MB file moves directly, survives the link dropping three times,
+  and resumes from the last confirmed chunk.
+- With recognition hidden, big transfers wait and say why; a group of 10
+  with a connected pairing graph: every member gets a big file.
 
 ## Implementation steps (after approval)
 
 1. Endpoint (Rust): file encryption, announcement messages, pieces, reassembly.
 2. Android: photo preparation and metadata removal, voice recording, file picking,
    attachments folder.
-3. Mesh: direct transfer frames and resume.
+3. *Later update:* mesh direct transfer frames and resume (not part of this update).
 4. Screens, on the UI branch.

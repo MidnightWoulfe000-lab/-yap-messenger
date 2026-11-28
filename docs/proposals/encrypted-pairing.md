@@ -1,6 +1,6 @@
 # Proposal: encrypted pairing
 
-**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+**Status: draft for review; do not implement.** Revised after Codex's fifth, sixth, seventh and eighth reviews of the
 v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this is a
 cryptographic protocol change and must be reviewed before any code is written. It answers finding 5
 of the [second Codex review](../audit/2026-11-27-local-mesh-v3.1-second-review.md) of
@@ -77,7 +77,9 @@ hub's `HELLO` carries only a rotating ID and a nonce). Before sending anything e
 the link, they run the published Noise Protocol Framework handshake
 **`Noise_NNpsk0_25519_ChaChaPoly_SHA256`** (revision 34), with the phone holding the
 smaller identity key as initiator and `psk` from §1. The prologue is
-`"Yap pairing v2"` followed by both QR payloads in identity order, so a handshake only
+`"Yap pairing v2"` followed by both QR payloads in identity order, where a QR payload
+is the **decoded raw bytes** (`YPR2` and the fields after it, 133 bytes), not the
+`yap:v2:` text or its base64url form and with no length prefixes, so a handshake only
 succeeds between the two phones that scanned each other's codes.
 
 - `NN` means neither side uses a long-term key in the handshake. Identities are still
@@ -127,7 +129,11 @@ without any cryptographic work. On a bound link only that attempt's `psk` is tri
 and the attempt's state picks which handshake runs: the original (prologue as above)
 if it is Scanned, the resume (§3) if it is Confirmed or later. Handshake messages carry
 no payload, so each is exactly 48 bytes (32-byte ephemeral key plus 16-byte tag); any
-other length is dropped. A bound link gets at most one handshake start per 10 seconds,
+other length is dropped. **This is a length check Yap makes itself before handing the
+message to `snow`**, because `snow` accepts a valid 49-byte message (the gate 4 run
+showed this). A wrong `psk` or prologue fails silently at the responder, so the
+initiator shows "Couldn't connect. Check you both scanned the right code" after 30
+seconds without an answer, kept apart from "other phone not found". A bound link gets at most one handshake start per 10 seconds,
 and an attempt has at most 4 bound links at once. If two links both complete a resume
 handshake, the first to finish wins and the other is unbound. Nothing in these frames
 shows a permanent identity.
@@ -236,6 +242,29 @@ without meeting, through the group's own encrypted connection between them.
    version, request ID, both identity keys, B's display name and the request's expires
    time) as a piece back to A, through any group they both still share. B saves A as a
    "finishing" contact with that secret and week.
+
+   **Which bundle the contact set-up uses** (seventh review finding 7, revised for
+   eighth review finding 5). Both phones know from the start which of them will be the
+   responder (the larger identity key). The responder **names its bundle in its own
+   signed message**: in the request if the requester is the responder, in the accept
+   otherwise. That message carries the responder's current monthly bundle in full (the
+   same signed bytes as in the group log, about 1.9 KB), so the initiator never depends
+   on a possibly stale log. **From the moment the responder signs that message, it
+   pins that bundle:** its private pre-keys and used-base-key record are kept until the
+   request's signed expiry by the responder's working time plus 2 days (the clock
+   rule's allowed skew), even if the monthly bundle is replaced meanwhile (group
+   encryption §3.2). Because the pin is made before the initiator can learn the bundle,
+   the initiator can never use an unpinned one. The initiator builds kind 03 only from
+   the named bundle, after checking its signature. If the responder no longer has the
+   named bundle's keys (a reset), it refuses kind 03, and the request ends at expiry
+   with "Friend request didn't finish". A crossed request keeps only the winner's
+   named bundle pinned; when a request is cancelled or expires, its pin is released
+   unless another live request names the same bundle. At most 25 pending requests can
+   each pin one bundle. No new key exchange is involved: this only keeps an existing
+   pre-key longer. Tests: a request made just before a monthly replacement and not yet
+   received by the responder; an initiator with a stale group log; the largest allowed
+   clock difference; crossed requests; cancellation on one phone; kind 04 lost and a
+   restart; the last shared group lost.
 3. When A receives the accept, it saves B the same way. The two then set up their own
    one-to-one contact session from each other's bundles in the group log (the smaller
    identity key initiates), with bootstrap messages travelling as group pieces. When
@@ -244,8 +273,33 @@ without meeting, through the group's own encrypted connection between them.
    6 hours until it gets an accept or the request expires; B answers a repeated request
    with the same cached accept. **Bootstrap retries** follow the same route and pace,
    not §3's ten-minute window: the initiator keeps its exact kind 03 bytes and resends
-   them until it receives kind 04; the responder answers a repeated kind 03 with its
-   exact cached kind 04. Both stop at Ready or at expiry, whichever comes first.
+   them until it receives kind 04, then stops (it is Ready); the responder, **even
+   after it is Ready**, keeps its exact cached kind 04 and answers a repeated kind 03
+   with it until the request expires (sixth review finding 6).
+
+   **How bootstrap travels on this route.** Today's kind 03 and kind 04 are bound to a
+   mesh envelope that expires in 24 hours, so their exact bytes cannot simply be
+   carried for 7 days. Today the binding is inside the authenticated plaintext (the
+   endpoint contract: `YEP1`, then the 68-byte envelope header binding, then the
+   message). On this route the authenticated plaintext of kind 03 and kind 04 carries,
+   in place of that envelope binding, a route binding: `"Yap friend bootstrap v1"`,
+   the request ID and the request's signed expiry. The receiver checks both against
+   the stored request before acting, and the creation-time and 24-hour checks are
+   replaced, on this route only, by "the request has not expired". Each resend travels
+   in a new group piece dated for its own hour; the inner bytes stay exactly the same.
+   Ordinary envelopes keep their 24-hour lifetime; nothing else is extended. This
+   changes only what Yap puts in its own plaintext; no new cryptography.
+
+   **At expiry with one side Ready.** If B is Ready but A reached expiry and deleted
+   its "finishing" contact, B shows A as "Finishing" until any authenticated message
+   from A arrives. If none has arrived by expiry, B shows "Friend request may not have
+   finished. Send a new request", and a new request from either replaces that
+   contact. As in §3, neither phone can know for certain the other committed its last
+   step.
+
+   Tests: kind 04 lost and then the responder restarted; the first kind 03 delivered
+   more than 24 hours after it was made; expiry reached on one phone first; the last
+   shared group lost before Ready.
 
 **One request per pair.** Friend requests belong to the two identities, not to a group:
 - **Crossed requests.** If A has asked B and B has asked A, both have agreed, so the
@@ -280,7 +334,7 @@ without meeting, through the group's own encrypted connection between them.
   on through another shared group. After Ready, leaving changes nothing.
 - **Replays:** request IDs, with their cached accepts, are remembered until 30 days
   after the request expires. After that, a replayed request is refused anyway because
-  it has expired, and working time never goes back (local storage §8), so an old
+  it has expired, and working time does not go back (local storage §8; the one accepted exception is up to 1 hour after the carrier store is recreated), so an old
   request is never accepted again, including after the friend was deleted. The one
   exception is the open limit of a restored older copy of the whole store. To become
   friends again, one of them sends a new request.
@@ -331,7 +385,15 @@ proposal still holds: joining a group does not make anyone contacts by itself).
 
 ## Test plan
 
-- Fixed test vectors for `psk`, the prologue and a full handshake.
+- Fixed test vectors for `psk`, the prologue and a full handshake. One prologue vector
+  from the gate 4 experiment (identities `02 0a…` and `03 15…`; test data in
+  `experiments/noise-pairing/tests/noise.rs`): the 280-byte original prologue has
+  SHA-256 `958e39c34212fc9f3f2b55c45d542575f0bc1860e774ffdea67562fb4950b05f`, with the
+  `psk` `fb574fe0abfae561de6fb3e1359eaa3431cff45bceef6cb0232579893b335984`. The
+  prologue hash was worked out from that test data, and not copied from a saved
+  run output.
+- Wrong `psk` or prologue: the initiator shows "Couldn't connect. Check you both
+  scanned the right code" after 30 seconds, not "other phone not found".
 - A full pairing on Bluetooth, shared-network Wi-Fi and Wi-Fi Aware, with a capture of
   every byte on the link: no identity key, bundle, confirmation or pair secret appears
   in clear.
@@ -349,8 +411,9 @@ proposal still holds: joining a group does not make anyone contacts by itself).
 - Friend through a group: request, accept, lost accept (repeated request gets the
   cached accept), ignored request expiring, the limits, and "not checked in person"
   changing after a QR scan; crossed requests install the smaller identity's secret on
-  both; the same pair through two groups gets one secret; leaving the group before
-  Ready cancels; an old request replayed after deletion is ignored; a full contact
+  both; the same pair through two groups gets one secret; leaving one of two shared
+  groups before Ready carries on, and leaving the last one shared before Ready cancels
+  (sixth review finding 9); an old request replayed after deletion is ignored; a full contact
   list leaves the request waiting.
 - Loss of kind 04 followed by a responder restart: the initiator resumes within the
   window and both become Ready.

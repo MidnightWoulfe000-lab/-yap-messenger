@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, a third found 4 and a fourth found 2; all are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design. Codex's fifth review of the v3.1 update (28 November 2026) led to further changes in §§3.2 and 3.11 (catch-up sessions, replay list, batch handling); these also need another review.
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, a third found 4 and a fourth found 2; all are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design. Codex's fifth review of the v3.1 update (28 November 2026) led to further changes in §§3.2 and 3.11 (catch-up sessions, replay list, batch handling), and Codex's sixth review (28 November 2026) to more in §§3.2, 3.6, 3.11, 6 and 7 (saved catch-up record, set-up work order); Codex's seventh review (28 November 2026) led to further changes in §§3.2 and 3.11 (order of selection, charges, friend-bootstrap pre-keys); Codex's eighth review (28 November 2026) led to a further change in §3.2 (which monthly bundle a friend request pins and how long its keys are kept); these also need another review.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -174,12 +174,23 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   set-up messages still in the mesh, and then deleted together with their
   record of used base keys: a set-up message for a deleted pre-key fails anyway.
   This keeps the record bounded. Storing it durably is Yap's job; libsignal only
-  calls the store.
+  calls the store. **One extension** (seventh and eighth reviews): a monthly
+  bundle that a friend request has pinned ([encrypted pairing](encrypted-pairing.md)
+  §5) keeps its private pre-keys and used-base-key record until that pin is
+  released: at most the request's signed expiry plus 2 days of allowed clock skew,
+  for at most 25 pending requests. *Cost, stated:* recorded monthly set-ups can
+  carry sender-key hand-overs, unlike catch-up's restricted first payload, so keeping
+  a monthly pre-key longer also lengthens how long a later capture of the phone could
+  open those recorded set-ups. The capture/deletion experiment (§3.11, gate 3 in [gates before integration](local-mesh-v3.1-group-envelopes.md#gates-before-integration)) covers retained monthly keys as well as catch-up keys, and §4's claims about old
+  messages hold only once every key still able to open them has been deleted.
 - **Set-up limits** (Codex finding 13). A set-up message carries the sender's
   identity key in the clear, so a phone first checks, cheaply, that the sender
   is an active member, and refuses anyone else. It then accepts at most 4 new
   sessions from one member per day before doing the expensive post-quantum
-  work. A member who needs more (after a restore, say) waits a day.
+  work. A member who needs more (after a restore, say) waits a day. This
+  allowance counts **attempts, not successes**, and covers every set-up, whether
+  it names a monthly pre-key, a catch-up pre-key or an unknown one: see "Work
+  before an answer" in 3.11 for the exact order (sixth review finding 2).
 - When two members both open a session at once, the one with the smaller
   identity key (comparing bytes) is the initiator, as in contact pairing, and
   the other session is dropped. This rule compares only set-ups that **both
@@ -585,12 +596,51 @@ own session record, which keeps one current session per peer and archives older 
   key wins. The other phone archives its own catch-up session and sends its step 2
   payload again over the winner. Nothing beyond step 2 has been sent on the losing
   session, because step 3 waits for a reply.
+- **The order of selection** (seventh review finding 1). A catch-up session a phone
+  has opened itself is **provisional** until either a reply on it is handled or a
+  competing set-up has been compared with it. When an authenticated catch-up set-up
+  arrives from a member while a provisional session to that member exists, in one
+  store transaction: (1) authenticate it (libsignal processing, not yet committed);
+  (2) compare the two by identity key; (3a) if the incoming one wins, install it,
+  archive the provisional one, retire its queue, save the catch-up record and reply as
+  above, and commit; (3b) if the provisional one wins, commit nothing from the
+  incoming set-up and keep waiting for a reply on the provisional one (the other phone
+  will receive this phone's set-up, lose the comparison and reply on it). The chosen-
+  session rule below applies only after this selection, so it can never stop the
+  winner being installed.
 - **Lost replies.** R resends its step 2 piece, unchanged and on the same session, at
   most once an hour (inside the answer limits below) until a reply arrives or 7 days
   pass. Then R shows "Out of step with <member>: ask to be re-invited". A further hint
-  from S during that time does not start a second session.
+  from S during that time does not start a second session. R keeps its exact set-up
+  bytes, retry count and deadline in the store, so a restart carries on the same retry.
+- **A saved catch-up record** (sixth review finding 1). libsignal refuses a set-up it
+  has already processed, so a repeat cannot simply be decrypted again. When S accepts
+  R's catch-up set-up, **one store transaction** holds: the installed session, the
+  retired queue, the replay record, the SHA-256 of the exact inner set-up bytes, and
+  the exact reply S encrypted to it, with a 7-day deadline. S keeps at most one such
+  record per member; a newly accepted catch-up from that member replaces it. When a
+  set-up arrives whose digest matches a saved record, **that is looked up first**,
+  before the allowance, the replay list and libsignal: S re-sends the saved reply in a
+  fresh outer layer for the current hour, at most once an hour per member, and uses no
+  allowance, no replay slot and no new session. This applies even when that member's
+  replay list is full. A duplicate that does not match a saved record is never treated
+  as accepted: it is refused as a replay. After the deadline the record is deleted and
+  a repeat is refused like any replay. Because the reply is saved in the same
+  transaction as the session, a restart after installing it still sends that reply.
+- **Keeping to the chosen session.** libsignal makes a newly processed set-up the
+  current session, and can switch to an archived session if a message decrypts under
+  it. So Yap saves which session it chose for catch-up (by its base key) and, until
+  the first reply on it has been handled, does not commit a message from that member
+  that decrypts only under a different session. This applies to the phone that
+  **opened** the chosen session, and ends when its first reply is handled. The phone
+  that **accepted** a catch-up set-up has already installed it as current and
+  needs no such rule. A competing catch-up set-up is handled by "The order of
+  selection" above, never by this rule.
 - **Tests:** both identity orders, both behind at once, a lost step 2 piece, a lost
-  reply, repeated hints, and a restart at each step: after the catch-up set-up is
+  reply answered from the saved record (including when the replay list is full), a
+  repeat after the record's deadline, repeated hints, set-ups naming a monthly or an
+  unknown pre-key counted against the allowance, the allowance surviving a restart,
+  and a restart at each step: after the catch-up set-up is
   sent, after it is installed, and after the first reply. All against the pinned
   libsignal.
 
@@ -607,17 +657,36 @@ phones do catch-up work. So a phone sends at most one catch-up answer per claime
 per hour and at most 10 an hour in total, and the answer goes only to the claimed
 sender's own catch-up bundle and inbox, so a faker gets nothing readable.
 
-**Work before an answer** (fifth review finding 4). For every incoming set-up that
-names a catch-up pre-key, in this order: (1) the outer layer opens (proving knowledge
-of the inbox key); (2) the cheap check that the clear identity key belongs to an active
-member; (3) one unit is taken from that member's allowance of 4 new sessions a day
-(3.2), **whether or not the set-up then succeeds**, and the set-up is dropped if the
-allowance is used up; (4) a phone-wide limit of 64 set-up attempts an hour across all
-groups and contacts, checked at the same point; (5) only then the libsignal processing.
-A failed set-up whose pre-key is missing fails before the post-quantum work. Answers
-(step 2) are then limited as above. The cost is stated: a removed member who fakes
-set-ups naming S can use up S's allowance on this phone, so honest catch-up from S may
-wait up to a day.
+**Work before an answer** (fifth review finding 4, sixth review finding 2). For
+**every** incoming set-up, whether it names a monthly pre-key, a catch-up pre-key or an
+unknown one, in this order: (1) the outer layer opens (proving knowledge of the inbox
+key); (2) the cheap check that the clear identity key belongs to an active member;
+(3) the saved catch-up record lookup above, and an exact repeat is answered from it
+and stops here; (4) one unit is taken from that member's allowance of 4 set-up
+attempts a day (3.2), **whether or not the set-up then succeeds**, and the set-up is
+dropped if the allowance is used up; (5) a phone-wide limit of 64 set-up attempts an
+hour across all groups and contacts, checked at the same point; (6) only then the
+libsignal processing. A set-up whose pre-key is missing or unknown fails before the
+post-quantum work. The allowance is one counter per member identity on this phone,
+shared across all groups, and saved in the store, so a restart does not reset it.
+**The charge is its own transaction** (seventh review finding 2): steps (4) and (5)
+commit the charge in a small transaction of their own **before** step (6) starts,
+and it is never refunded. Step (6) then runs as an ordinary all-or-nothing operation
+(local storage §4): if libsignal refuses the set-up, every session, pre-key, history
+and outbox change from it is discarded, but the charge stays. If the charge itself
+cannot be committed (storage full), the set-up is dropped without any libsignal work.
+The same applies to the answer limits in step 2: a reply's rate charge is committed
+before the reply is made.
+Only a set-up that libsignal authenticates writes a replay record, so a faked set-up
+can never fill another member's replay list. Answers (step 2) are then limited as
+above.
+
+*Stated limit:* the identity key is not authenticated until libsignal succeeds, so a
+removed member who keeps faking set-ups naming S can use up S's allowance on this
+phone every day, for as long as the attack goes on, and honest new sessions from S
+then wait. Existing working sessions and saved catch-up records are not affected. This
+is a denial-of-service limit, not a way to get a replay accepted; a stronger admission
+rule would need its own reviewed design.
 
 **The replay list** (decided, owner, 28 November 2026). Base keys used with my catch-up
 pre-keys are recorded for the whole membership, so a replayed catch-up set-up is
@@ -1058,8 +1127,11 @@ an independent review of the whole design.
     newest is installed either way;
   - a restart while a piece is waiting in the queue;
   - an old generation arriving just before the newest.
-- Old keys are deleted after the envelope lifetime, and a restored backup cannot
-  bring them back.
+- Old keys are deleted after the envelope lifetime. **Accepted limit, shown by a
+  test:** restoring an older copy of the whole store brings erased keys back, and the
+  test restores one and records exactly what can be opened again, so the limit is
+  documented rather than assumed away (sixth review finding 9; the restored-store
+  limit in local storage §8).
 - Hand-over counts and sizes measured in 5-, 30- and 128-member groups.
 
 ## 7. Order of work, once approved
@@ -1072,5 +1144,4 @@ an independent review of the whole design.
 4. Build the encryption layer in a separate crate on the sender-key functions,
    with the tests in section 6 run on simulated phones.
 5. Measure the costs in 3.9.
-6. Connect it to the mesh envelope and the Android app, kept separate from the
-   unencrypted legacy chat.
+6. Connect it to the mesh envelope and the Android app.
