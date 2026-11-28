@@ -4,6 +4,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
@@ -23,7 +24,6 @@ class YapUiTest {
     private val compose = createAndroidComposeRule<MainActivity>()
     @get:Rule val rules: TestRule = RuleChain.outerRule(seedProfile).around(compose)
 
-    private fun openChat() = compose.onNodeWithText("Nearby Yap phone").performScrollTo().performClick()
     private fun back() = compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
     private fun preview() {
         compose.onNodeWithText("Settings").performClick()
@@ -33,27 +33,18 @@ class YapUiTest {
 
     @Test fun pairingPageLoadsNativeIdentityAndScannableCode() {
         compose.onNodeWithText("Add a friend").performScrollTo().performClick()
-        compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Your Yap pairing code").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithContentDescription("Your Yap pairing code").assertIsDisplayed()
+        compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("Your Yap pairing code", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Your Yap pairing code", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Scan their code").performScrollTo().assertIsEnabled()
+        // The fingerprint now sits under "Other ways to add a friend", which starts collapsed.
+        compose.onNodeWithText("Other ways to add a friend").performScrollTo().performClick()
         compose.onNodeWithText("Your fingerprint").performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun composerChecksUtf8BytesAndKeyboardSendDoesNotBypassValidation() {
-        openChat()
-        compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
-        compose.onNode(hasSetTextAction()).performTextInput("😀".repeat(6))
-        compose.onNodeWithText("24 / 20 UTF-8 bytes · Shorten your message").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
-        compose.onNode(hasSetTextAction()).performImeAction()
-        compose.onNodeWithText("24 / 20 UTF-8 bytes · Shorten your message").assertIsDisplayed()
-        compose.onNode(hasSetTextAction()).performTextReplacement("😀".repeat(5))
-        compose.onNodeWithText("20 / 20 UTF-8 bytes").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Send").assertIsEnabled()
-    }
-
+    // The legacy chat is gone, so this walks the same path through the preview's sample conversation.
     @Test fun systemBackReturnsThroughControlsAndConversationToChats() {
-        openChat()
+        preview()
+        compose.onNodeWithText("Ravi").performScrollTo().performClick()
         compose.onNodeWithContentDescription("Connection controls").performClick()
         compose.onNodeWithText("Connections").assertIsDisplayed()
         back()
@@ -68,7 +59,7 @@ class YapUiTest {
         compose.onNodeWithText("Internet · planned").assertDoesNotExist()
         compose.onNodeWithText("Connections, not physical positions").assertDoesNotExist()
         compose.onNodeWithContentDescription("Network details").performClick()
-        compose.onNodeWithText("Advanced: internet relay and test chat").performScrollTo().performClick()
+        compose.onNodeWithText("Advanced: relay and nearby log").performScrollTo().performClick()
         compose.onNodeWithText("Relay URL").performScrollTo().assertIsDisplayed()
         back()
         compose.onNodeWithText("Settings").performClick()
@@ -103,12 +94,19 @@ class YapUiTest {
         compose.onNodeWithText("Ravi").assertDoesNotExist()
     }
 
+    // The legacy chat's draft lived in its own state holder. An encrypted chat keeps its draft in the
+    // process-wide SecureModel, and the preview's composer is disabled, so a draft cannot be typed in a
+    // sample conversation. This checks that the encrypted draft survives the activity being recreated, and
+    // that the open screen survives too. (Typing into a real encrypted chat needs a paired contact.)
     @Test fun draftSurvivesActivityRecreation() {
-        openChat()
-        compose.onNode(hasSetTextAction()).performTextInput("Keep my draft")
+        val secure = SecureModel.get(compose.activity.application)
+        compose.runOnUiThread { secure.draft = "Keep my draft" }
+        preview()
+        compose.onNodeWithText("Ravi").performScrollTo().performClick()
         compose.activityRule.scenario.recreate()
-        compose.onNode(hasSetTextAction()).assertTextContains("Keep my draft")
         compose.onNodeWithContentDescription("Connection controls").assertIsDisplayed()
+        compose.runOnUiThread { assertEquals("Keep my draft", SecureModel.get(compose.activity.application).draft) }
+        compose.runOnUiThread { secure.draft = "" }
     }
 
     @Test fun backExitsPreviewAtTheChatsRoot() {
