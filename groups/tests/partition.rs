@@ -56,21 +56,8 @@ fn both_sides_converge_after_reconnecting() {
     let (log, p) = group_of(5, true, true);
     let mut left = log.clone();
     let mut right = log;
-    left.append(
-        &p[0],
-        Body::AddDevice {
-            device: DeviceKey([1; 32]),
-        },
-    )
-    .unwrap();
-    right
-        .append(
-            &p[4],
-            Body::AddDevice {
-                device: DeviceKey([2; 32]),
-            },
-        )
-        .unwrap();
+    propose(&mut left, &p[0], &id(30));
+    propose(&mut right, &p[4], &id(31));
     let snapshot = left.clone();
     sync(&right, &mut left);
     sync(&snapshot, &mut right);
@@ -157,14 +144,7 @@ fn revoked_elsewhere_is_out_after_sync_but_earlier_actions_stand() {
 
     let mut last = [0; 32];
     for n in 0..4 {
-        last = right
-            .append(
-                e,
-                Body::AddDevice {
-                    device: DeviceKey([n; 32]),
-                },
-            )
-            .unwrap();
+        last = propose(&mut right, e, &id(40 + n));
     }
     sync(&right, &mut left);
     let state = left.state().unwrap();
@@ -174,19 +154,9 @@ fn revoked_elsewhere_is_out_after_sync_but_earlier_actions_stand() {
     ));
     // What E did before the sync stands.
     assert_eq!(left.is_valid(&last), Some(true));
-    assert!(state.members[&e.key()]
-        .devices
-        .contains(&DeviceKey([3; 32])));
     // Once E's side has the revocation, E is out.
     sync(&left, &mut right);
-    let after = right
-        .append(
-            e,
-            Body::AddDevice {
-                device: DeviceKey([9; 32]),
-            },
-        )
-        .unwrap();
+    let after = propose(&mut right, e, &id(49));
     assert_eq!(right.is_valid(&after), Some(false));
     assert!(state.warnings.contains(&Warning::ActedWhileRevoked {
         event: last,

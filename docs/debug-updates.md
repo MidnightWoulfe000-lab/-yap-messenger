@@ -17,14 +17,14 @@ and the app contacts GitHub only when you tap it.
 
 ## First time on a phone
 
-Android only installs an update when the signing key matches. Debug builds from before
-this change used a different key each time, so **uninstall Yap once**, install a build
-made after this change by hand, and allow "Install unknown apps" for Yap when asked.
+Android only installs an update when the signing key matches. Builds from before the move
+to the private key (see [signing.md](signing.md)) used a public key, so **uninstall Yap
+once**, install a build signed with the new key by hand, and allow "Install unknown apps" for Yap when asked.
 Later updates keep your data.
 
 ## Signing key
 
-`android/app/debug.keystore` is a deliberately public development key (password
-`android`). Anyone can sign an APK with it, so it must never be used for a release or for
-anything other than disposable debug builds. If that stops being acceptable, move the
-keystore into a GitHub secret and have CI write it to this path before building.
+CI signs builds with a private key held only by the owner, supplied through GitHub Actions
+secrets. See [signing.md](signing.md) for how it works and the owner's setup steps. A build
+made on your own machine uses Android's per-machine debug key instead, and **cannot update an
+install that CI signed**. Builds from CI without the secrets are not published.

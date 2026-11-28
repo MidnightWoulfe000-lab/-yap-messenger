@@ -189,7 +189,7 @@ private fun PairingQr(value: String) {
 }
 
 @Composable
-internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit, legacy: () -> Unit, back: () -> Unit) {
+internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit, back: () -> Unit) {
     var url by remember(model.relayUrl) { mutableStateOf(model.relayUrl) }
     var credential by remember { mutableStateOf("") }
     var ca by remember { mutableStateOf("") }
@@ -207,9 +207,10 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
             if (model.meshEnabled) OutlinedButton(onClick = model::disableMesh, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Pause nearby messaging") }
             if (Build.VERSION.SDK_INT < 29) InfoNote("This phone can use Wi-Fi only. Bluetooth nearby messaging needs Android 10 or later.")
             InfoNote(model.status, accent = if (model.locked) Coral else Blue)
+            KeepsStoppingHelp()
             HorizontalDivider(color = Surface2)
             TextButton(onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(if (showAdvanced) "Hide advanced" else "Advanced: relay, test chat and nearby log")
+                Text(if (showAdvanced) "Hide advanced" else "Advanced: relay and nearby log")
             }
             if (showAdvanced) {
             Text("Nearby log", color = White, style = MaterialTheme.typography.titleMedium)
@@ -238,10 +239,6 @@ internal fun SecureConnectionsScreen(model: SecureModel, enableMesh: () -> Unit,
             if (model.relayConfigured) OutlinedButton(onClick = model::removeRelay, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Disable internet relay") }
             Text("Mailbox token", color = White, style = MaterialTheme.typography.titleMedium)
             SelectionContainer { Text(model.snapshot.route, color = Soft) }
-            HorizontalDivider(color = Surface2)
-            Text("Legacy Bluetooth test", color = White, style = MaterialTheme.typography.titleMedium)
-            Text("The original 20-byte chat is unencrypted and separate from paired messaging.", color = Soft)
-            OutlinedButton(onClick = legacy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Open legacy Bluetooth controls") }
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -274,7 +271,7 @@ internal fun SecureStorageScreen(model: SecureModel, back: () -> Unit) {
             DetailRow("Saved messages", "${model.snapshot.history.size} visible message(s)", Icons.Default.Storage)
             DetailRow("Outgoing ciphertext", "${model.snapshot.queued} queued record(s)", Icons.Default.Outbox)
             DetailRow("Relay custody", "${model.relayQueued} opaque envelope(s)", Icons.Default.Hub)
-            Text("Paired history is encrypted at rest and excluded from cloud backup and device transfer. The legacy test chat remains in memory only.", color = Soft)
+            Text("Paired history is encrypted at rest and excluded from cloud backup and device transfer.", color = Soft)
             Button(onClick = model::retry, enabled = !model.locked, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Retry queued messages") }
             OutlinedButton(onClick = { confirm = true }, enabled = !model.locked, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Clear visible encrypted history") }
             InfoNote("Clearing visible history keeps queued ciphertext and unexpired replay protection. It cannot delete another phone's messages.")

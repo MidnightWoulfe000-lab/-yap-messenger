@@ -54,7 +54,7 @@ class YapUiTest {
 
     @Test fun systemBackReturnsThroughControlsAndConversationToChats() {
         openChat()
-        compose.onNodeWithContentDescription("Bluetooth controls").performClick()
+        compose.onNodeWithContentDescription("Connection controls").performClick()
         compose.onNodeWithText("Connections").assertIsDisplayed()
         back()
         compose.onNodeWithText("Message").assertExists()
@@ -100,7 +100,6 @@ class YapUiTest {
         compose.onNodeWithText("3 devices").assertIsDisplayed()
         compose.onNodeWithText("Via Ravi · Local mesh").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Exit preview").performClick()
-        compose.onNodeWithText("Nearby Yap phone").assertExists()
         compose.onNodeWithText("Ravi").assertDoesNotExist()
     }
 
@@ -109,14 +108,13 @@ class YapUiTest {
         compose.onNode(hasSetTextAction()).performTextInput("Keep my draft")
         compose.activityRule.scenario.recreate()
         compose.onNode(hasSetTextAction()).assertTextContains("Keep my draft")
-        compose.onNodeWithContentDescription("Bluetooth controls").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Connection controls").assertIsDisplayed()
     }
 
     @Test fun backExitsPreviewAtTheChatsRoot() {
         preview()
         back()
         compose.onNodeWithText("Design preview · Sample data").assertDoesNotExist()
-        compose.onNodeWithText("Nearby Yap phone").assertExists()
     }
 
     @Test fun searchAndGroupFiltersHaveHonestEmptyStates() {

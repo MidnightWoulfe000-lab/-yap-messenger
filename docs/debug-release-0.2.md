@@ -30,9 +30,8 @@ address under Connections. A private public CA certificate can be supplied;
 hostname verification remains enabled. Operator instructions are in
 [relay-server/README.md](../relay-server/README.md).
 
-The original **Nearby Yap phone** chat remains an explicitly unencrypted 20-byte
-Bluetooth test. Its controls are under Connections → Legacy Bluetooth test.
-Design preview screens use labelled sample data and cannot send.
+The old unencrypted 20-byte Bluetooth chat has been removed; all messaging uses the
+encrypted endpoint. Design preview screens use labelled sample data and cannot send.
 
 ## Boundaries
 
@@ -45,7 +44,7 @@ Design preview screens use labelled sample data and cannot send.
   need a project decision before implementation.
 - Losing Android Keystore keys makes saved identity/history inaccessible. Backup
   and transfer are disabled; storage corruption or missing keys fail closed.
-- This debug APK uses a development signing key and includes arm64-v8a and x86_64
+- This debug APK is signed with the project's private key from CI (see [signing.md](signing.md)); a local build uses Android's own debug key and includes arm64-v8a and x86_64
   native libraries. It is not a production release or a guarantee of safety for
   sensitive communication.
 

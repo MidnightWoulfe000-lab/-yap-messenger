@@ -4,7 +4,7 @@ The Android 0.2 debug app now links the reviewed Rust endpoint and durable relay
 core. It implements pinned-Signal one-to-one encryption, mutual QR/package pairing,
 Keystore-backed atomic snapshots, ciphertext queues, recipient receipts, foreground
 LE L2CAP transport and a configurable private TLS WebSocket client. The original
-20-byte BLE prototype remains separate. See the [release guide](debug-release-0.2.md)
+20-byte BLE prototype has been removed. See the [release guide](debug-release-0.2.md)
 and [endpoint contract](android-endpoint-v1.md). This is experimental development
 software, without an independent security audit or physical three-phone mesh test.
 
@@ -16,7 +16,7 @@ software, without an independent security audit or physical three-phone mesh tes
 | Persistent relay | Immediate-durability redb custody, pending digest index, bounded LRU cache, quotas/rate gates, expiry and clock high-water checks | Production disk/memory measurements, fair scheduling, deployment load tests |
 | Internet | TLS WebSocket server, typed Rust client and bounded Android client; provisioned credentials; mailbox ownership and private CA configuration | Production deployment, credential rotation and load testing |
 | Cryptography | Pinned libsignal v0.104.0 endpoint, mutual pairing, staged stores, Keystore snapshots, replay/receipt/retirement checks | Independent audit, multi-device and lost-device recovery |
-| Mobile mesh | Legacy BLE retained; v2 link layer shared by Bluetooth L2CAP and Wi-Fi (same network or hotspot) with rotating link IDs; native store-and-forward integrated ([local mesh v2](proposals/local-mesh-v2.md)) | Foreground A–B–C hardware tests, rotating envelope tags, later background/iOS work |
+| Mobile mesh | Old unencrypted BLE chat removed; v2 link layer shared by Bluetooth L2CAP and Wi-Fi (same network or hotspot) with rotating link IDs; native store-and-forward integrated ([local mesh v2](proposals/local-mesh-v2.md)) | Foreground A–B–C hardware tests, rotating envelope tags, later background/iOS work |
 
 The original `HashSet` simulation has been replaced. Relay queue commits are
 transactional; successful custody is reported only after commit. Recent-cache

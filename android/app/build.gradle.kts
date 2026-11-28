@@ -18,14 +18,18 @@ android {
         buildConfigField("String", "UPDATE_REPO", "\"MidnightWoulfe000-lab/-yap-messenger\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    // One fixed, public development key. Android only installs an update when the signing key
-    // matches the installed app, and CI would otherwise generate a new key on every run.
-    signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+    // CI signs with a private key supplied through environment variables (see docs/signing.md).
+    // Without them, a local build uses Android's own per-machine debug key. Such a build cannot
+    // update an install that CI signed, and the other way round.
+    val signingKeystore = System.getenv("YAP_SIGNING_KEYSTORE_PATH")
+    if (!signingKeystore.isNullOrBlank()) {
+        signingConfigs {
+            getByName("debug") {
+                storeFile = file(signingKeystore)
+                storePassword = System.getenv("YAP_SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("YAP_SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("YAP_SIGNING_KEY_PASSWORD")
+            }
         }
     }
     compileOptions {

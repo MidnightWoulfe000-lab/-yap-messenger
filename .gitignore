@@ -22,8 +22,6 @@ xcuserdata/
 .env.*
 !.env.example
 *.keystore
-# Public development key, so debug builds can update each other. Never use it for a release.
-!android/app/debug.keystore
 *.jks
 *.p12
 *.pfx

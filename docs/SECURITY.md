@@ -2,10 +2,11 @@
 
 **Status: experimental implementation; no independent security audit.** Android
 0.2 debug now includes tested native one-to-one encryption, mutual key pairing
-and Keystore-backed snapshots. The original BLE test remains unencrypted. The
+and Keystore-backed snapshots. The old unencrypted Bluetooth chat has been removed; all messaging goes through the
+encrypted endpoint. The
 [endpoint contract](android-endpoint-v1.md) specifies this limited release;
 [release boundaries](debug-release-0.2.md) distinguish emulator evidence from
-pending physical mesh, group, recovery and multi-device work.
+pending physical mesh, group and recovery work (multiple devices per person are no longer planned).
 
 This document preserves the security direction discussed for Yap. It is **not** a completed cryptographic protocol or an audit. If a detail is not specified, ask rather than silently choosing one.
 
@@ -41,18 +42,16 @@ This document preserves the security direction discussed for Yap. It is **not** 
 - Threat model and security guarantees for each release stage.
 
 ## Release guardrails
-- Describe encrypted paired conversations separately from the unencrypted legacy
-  test. Never advertise anonymity, an independent audit or safety for sensitive
+- Never advertise anonymity, an independent audit or safety for sensitive
   communication from these development tests.
 - Do not implement cryptographic or governance features from assumptions. Write a design proposal, review its threat model, then implement and test.
 - Do not break known-good Bluetooth messaging as a side effect of UI work.
 - Do not claim an external security audit has happened unless it has.
 
 ## Present state
-The legacy November 2026 Bluetooth test uses unauthenticated, unencrypted,
-foreground-only messages of up to 20 UTF-8 bytes, with no saved history.
-Two-phone exchange was demonstrated in user tests. The new 0.2 paired endpoint
-uses the separately reviewed contract linked above. Its native encryption and
+The old November 2026 unencrypted Bluetooth chat (unauthenticated, 20 UTF-8 bytes, no
+saved history) was removed in the v3.1 clean-ups (owner decision, 27 November 2026). The
+0.2 paired endpoint uses the separately reviewed contract linked above. Its native encryption and
 persistence tests do not validate physical radio interoperability or establish
 production readiness.
 

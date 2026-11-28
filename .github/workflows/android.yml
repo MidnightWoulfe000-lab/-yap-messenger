@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     steps:
       - name: Get the code
         uses: actions/checkout@v4
@@ -46,11 +48,35 @@ jobs:
         run: bash scripts/build-native.sh
       # GitHub Ubuntu runners already have an Android SDK installed.
       # Avoid a separate setup action until we need custom SDK tooling.
+      # The private signing key lives only in GitHub secrets (docs/signing.md). It is written to a
+      # temporary file for this job and deleted afterwards. Pull requests from forks get no secrets,
+      # so they build with Android's default debug key and are never published.
+      - name: Write the signing key to a temporary file
+        id: signing
+        env:
+          YAP_SIGNING_KEYSTORE_B64: ${{ secrets.YAP_SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$YAP_SIGNING_KEYSTORE_B64" ]; then
+            keystore="$RUNNER_TEMP/yap-signing.jks"
+            printf '%s' "$YAP_SIGNING_KEYSTORE_B64" | base64 --decode > "$keystore"
+            chmod 600 "$keystore"
+            echo "YAP_SIGNING_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No signing key secret. This build uses the default debug key and will not be published."
+          fi
       - name: Build, test and lint Yap
         working-directory: android
         env:
           YAP_BUILD_NUMBER: ${{ github.run_number }}
+          YAP_SIGNING_STORE_PASSWORD: ${{ secrets.YAP_SIGNING_STORE_PASSWORD }}
+          YAP_SIGNING_KEY_ALIAS: ${{ secrets.YAP_SIGNING_KEY_ALIAS }}
+          YAP_SIGNING_KEY_PASSWORD: ${{ secrets.YAP_SIGNING_KEY_PASSWORD }}
         run: ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+      - name: Delete the temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/yap-signing.jks"
       - name: Save test and lint reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,7 +102,7 @@ jobs:
   # Runs for main and for manual runs, never for pull requests.
   publish:
     needs: build
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    if: needs.build.outputs.signed == 'true' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,4 +119,4 @@ jobs:
           gh release delete debug-latest --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
           gh release create debug-latest yap-debug-*.apk --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --prerelease --title "Latest debug build" \
-            --notes "Debug build from commit $GITHUB_SHA ($GITHUB_REF_NAME). Development signing key; not a production release."
+            --notes "Debug build from commit $GITHUB_SHA ($GITHUB_REF_NAME). Debug build signed with the project's private key; not a production release."

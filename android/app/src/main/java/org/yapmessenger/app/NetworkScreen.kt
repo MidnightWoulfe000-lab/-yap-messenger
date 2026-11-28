@@ -38,18 +38,18 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.*
 
 @Composable
-internal fun NetworkScreen(session: ChatSession, preview: Boolean, reduceMotion: Boolean, manage: () -> Unit,
+internal fun NetworkScreen(preview: Boolean, reduceMotion: Boolean, manage: () -> Unit,
     meshPeers: Int = 0, internet: Boolean = false, meshVisible: Boolean = false, meshLinks: List<MeshLink> = emptyList()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Network", style = MaterialTheme.typography.headlineLarge, fontSize = 44.sp, letterSpacing = (-2).sp, color = White, modifier = Modifier.weight(1f))
             IconButton(onClick = manage) { Icon(Icons.Outlined.Tune, "Network details", tint = Soft) }
         }
-        Text(if (preview) "3 devices" else if (meshPeers > 0 || internet) "$meshPeers local link(s)${if (internet) " · Internet connected" else ""}" else if (session.peer != PeerObservation.NONE) "1 device seen" else "Your local network",
+        Text(if (preview) "3 devices" else if (meshPeers > 0 || internet) "$meshPeers local link(s)${if (internet) " · Internet connected" else ""}" else "Your local network",
             color = Soft, style = MaterialTheme.typography.bodyMedium)
-        NetworkVisualisation(preview, session.peer, reduceMotion, meshPeers, internet)
-        if (preview || session.peer == PeerObservation.CONNECTED || meshPeers > 0 || internet) Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.Center) {
-            if (preview || meshPeers > 0 || session.peer == PeerObservation.CONNECTED) ConnectionLegend(if (preview || meshPeers > 0) "Local mesh" else "Bluetooth", Lime, false, Modifier.padding(end = 28.dp))
+        NetworkVisualisation(preview, reduceMotion, meshPeers, internet)
+        if (preview || meshPeers > 0 || internet) Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.Center) {
+            if (preview || meshPeers > 0) ConnectionLegend("Local mesh", Lime, false, Modifier.padding(end = 28.dp))
             if (preview || internet) ConnectionLegend("Internet", NetLink, true, Modifier)
         }
         if (preview) {
@@ -68,22 +68,15 @@ internal fun NetworkScreen(session: ChatSession, preview: Boolean, reduceMotion:
                 if (internet) NetworkPeerRow("Configured relay", "Connected · TLS")
             }
             if (meshPeers > 3) Text("Map shows three of $meshPeers active local links", color = Soft, style = MaterialTheme.typography.bodySmall)
-            if (session.peer != PeerObservation.NONE) NetworkPanel {
-                NetworkPeerRow("Nearby Yap phone", when (session.peer) {
-                    PeerObservation.CONNECTED -> "Connected · Bluetooth"
-                    PeerObservation.CONNECTING -> "Connecting…"
-                    else -> "Seen recently"
-                })
-            }
-            else if (meshPeers == 0 && !internet) Text("No devices nearby yet", color = Soft, style = MaterialTheme.typography.bodyMedium,
+            if (meshPeers == 0 && !internet) Text("No devices nearby yet", color = Soft, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth().yapCard(18.dp)
                 .clickable(onClick = manage).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.WifiTethering, null, tint = if (session.advertising || meshVisible) Lime else Soft, modifier = Modifier.size(24.dp))
+                Icon(Icons.Outlined.WifiTethering, null, tint = if (meshVisible) Lime else Soft, modifier = Modifier.size(24.dp))
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    Text(if (session.advertising || meshVisible) "You're visible" else "Make yourself visible", color = White, style = MaterialTheme.typography.titleMedium)
-                    Text(if (session.advertising || meshVisible) "Nearby phones can find you" else "Let nearby phones find you", color = Soft, style = MaterialTheme.typography.bodySmall)
+                    Text(if (meshVisible) "You're visible" else "Make yourself visible", color = White, style = MaterialTheme.typography.titleMedium)
+                    Text(if (meshVisible) "Nearby phones can find you" else "Let nearby phones find you", color = Soft, style = MaterialTheme.typography.bodySmall)
                 }
                 Icon(Icons.Default.ChevronRight, null, tint = Soft, modifier = Modifier.size(20.dp))
             }
@@ -122,7 +115,7 @@ private data class VisualNode(val name: String, val subtitle: String, val x: Flo
 
 /** Decorative fabric and observed/sample edges are deliberately distinct layers. */
 @Composable
-private fun NetworkVisualisation(preview: Boolean, peer: PeerObservation, reduceMotion: Boolean, meshPeers: Int, internet: Boolean) {
+private fun NetworkVisualisation(preview: Boolean, reduceMotion: Boolean, meshPeers: Int, internet: Boolean) {
     val motion = systemMotionEnabled() && !reduceMotion
     val phase = if (motion) {
         val transition = rememberInfiniteTransition(label = "Network fabric")
@@ -137,8 +130,7 @@ private fun NetworkVisualisation(preview: Boolean, peer: PeerObservation, reduce
     ) else if (meshPeers > 0 || internet) listOf(VisualNode("You", "", .5f, .5f, true, Lime)) +
         listOf(VisualNode("Node 1", "Local link", .8f, .24f, tint = Blue), VisualNode("Node 2", "Local link", .8f, .76f, tint = Coral), VisualNode("Node 3", "Local link", .2f, .76f, tint = violet)).take(meshPeers.coerceAtMost(3)) +
         if (internet) listOf(VisualNode("Relay", "Internet", .2f, .24f, tint = NetLink)) else emptyList()
-    else listOf(VisualNode("You", "", .5f, .5f, true, Lime)) +
-        if (peer != PeerObservation.NONE) listOf(VisualNode("Nearby phone", if (peer == PeerObservation.CONNECTED) "Connected" else if (peer == PeerObservation.CONNECTING) "Connecting…" else "Seen recently", .8f, .24f, tint = Blue)) else emptyList()
+    else listOf(VisualNode("You", "", .5f, .5f, true, Lime))
     val showLabels = LocalDensity.current.fontScale <= 1.35f
     BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1f).testTag("network-map")) {
         val w = maxWidth
@@ -183,7 +175,7 @@ private fun NetworkVisualisation(preview: Boolean, peer: PeerObservation, reduce
             else if (meshPeers > 0 || internet) {
                 for (index in 1..meshPeers.coerceAtMost(3)) link(0, index)
                 if (internet) link(0, nodes.lastIndex, true)
-            } else if (peer == PeerObservation.CONNECTED) link(0, 1)
+            }
             nodes.forEach { node ->
                 val center = Offset(size.width * node.x, size.height * node.y)
                 val colour = node.tint

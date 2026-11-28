@@ -21,12 +21,6 @@ import androidx.compose.ui.unit.dp
 
 internal data class ChatSummary(val id: String, val name: String, val snippet: String, val time: String = "", val unread: Int = 0, val group: Boolean = false)
 
-internal fun liveChat(session: ChatSession): ChatSummary {
-    val latest = (session.messages.toList() + listOfNotNull(session.lastAttempt)).maxByOrNull { it.id }
-    return ChatSummary("nearby", "Nearby Yap phone", latest?.body ?: "Start a Bluetooth conversation",
-        latest?.let { chatListTime(it.createdAt) } ?: "", session.unreadCount)
-}
-
 @Composable
 internal fun ChatsScreen(chats: List<ChatSummary>, preview: Boolean, open: (String) -> Unit, newChat: () -> Unit, pairFirst: Boolean = false,
     myName: String = "", myColour: Color = Lime, link: String = "", linkActive: Boolean = false, openProfile: () -> Unit = {}, openLink: () -> Unit = {}) {

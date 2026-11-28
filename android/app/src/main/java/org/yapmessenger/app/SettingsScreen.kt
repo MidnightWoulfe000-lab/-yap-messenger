@@ -74,45 +74,19 @@ private fun SettingsRow(title: String, subtitle: String, icon: ImageVector, open
 }
 
 @Composable
-internal fun ConnectionScreen(session: ChatSession, preview: Boolean, discover: () -> Unit, back: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        PageHeader("Connections", back)
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp)) {
-            DetailRow("Direct Bluetooth", if (preview) "Sample connection · Preview only" else if (session.advertising) "Visible to nearby phones" else "Foreground messaging", Icons.Default.Bluetooth)
-            Spacer(Modifier.height(16.dp))
-            if (!preview) {
-                Text(session.status, color = Soft, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = discover, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Make this phone discoverable") }
-            }
-            Spacer(Modifier.height(16.dp))
-            InfoNote("Keep Yap open on both phones. Messages are limited to 20 UTF-8 bytes and are not encrypted or saved.", accent = Coral)
-            Spacer(Modifier.height(20.dp))
-            DetailRow("Local mesh", "Forwarding through other devices · Planned", Icons.Default.Hub)
-            Spacer(Modifier.height(6.dp))
-            DetailRow("Internet", "Internet transport · Planned", Icons.Default.Language)
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-}
-
-@Composable
-internal fun PreferenceScreen(page: String, session: ChatSession, preview: Boolean, reduceMotion: Boolean, onReduceMotion: (Boolean) -> Unit,
+internal fun PreferenceScreen(page: String, preview: Boolean, reduceMotion: Boolean, onReduceMotion: (Boolean) -> Unit,
     back: () -> Unit, network: () -> Unit) {
-    var confirmClear by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         PageHeader(page, back)
         Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             when (page) {
                 "Network & connections" -> {
-                    DetailRow("Bluetooth controls", "Discoverability and connection status", Icons.Default.Bluetooth, network)
-                    InfoNote("The current prototype connects directly to a nearby phone. Mesh forwarding and internet links are not implemented.")
+                    DetailRow("Connections", "Nearby messaging and its status", Icons.Default.Hub, network)
                 }
                 "Privacy & identity" -> {
-                    InfoNote("Encryption and verified identities are not available in this prototype.", accent = Coral)
-                    Text("Nearby discovery does not verify who owns a phone. Do not share private information in this test chat.", color = Soft)
+                    InfoNote("Sample page in the design preview. Your real privacy and identity settings are in Settings when the preview is closed.")
                 }
-                "Notifications" -> InfoNote("Incoming messages appear while Yap is open. Background message notifications are not available in this prototype.")
+                "Notifications" -> InfoNote("New messages are announced while nearby messaging runs in the background. Android may ask for permission to show notifications.")
                 "Appearance" -> {
                     Row(Modifier.fillMaxWidth().background(Surface, RoundedCornerShape(16.dp)).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -125,24 +99,16 @@ internal fun PreferenceScreen(page: String, session: ChatSession, preview: Boole
                     InfoNote("Yap also honours Android's Remove animations setting. Text follows your system font size.")
                 }
                 "Data & storage" -> {
-                    InfoNote("No saved history. Messages stay in memory for this app session, including screen rotation. They may disappear when Android closes the app.")
-                    OutlinedButton(onClick = { confirmClear = true }, enabled = !preview && session.pendingText == null,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Clear this session") }
-                    if (session.pendingText != null) Text("Wait for the current send to finish before clearing the session.", color = Soft)
-                    if (preview) Text("Live history cannot be cleared from the design preview.", color = Soft)
+                    InfoNote("Sample page in the design preview. Real history cannot be changed from here.")
                 }
                 else -> {
                     Wordmark()
                     Text("Nobody gets to silence you.", color = Lime, style = MaterialTheme.typography.titleLarge)
                     Text("Communication is a right, not a privilege.", color = White)
-                    InfoNote("Free, open source and offline first. GPLv3. This is an experimental Bluetooth prototype, not a secure messenger.")
+                    InfoNote("Free, open source and offline first. GPLv3. Experimental software: it has not been independently audited.")
                 }
             }
             Spacer(Modifier.height(24.dp))
         }
     }
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("Clear this session?") },
-        text = { Text("Remove this phone's in-memory message history. This does not delete messages from another phone.") },
-        confirmButton = { TextButton(onClick = { session.clearHistory(); confirmClear = false }) { Text("Clear session") } },
-        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } })
 }

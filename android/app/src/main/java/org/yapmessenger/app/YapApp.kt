@@ -12,7 +12,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit,
+internal fun YapApp(
     secure: SecureModel, discoverMesh: () -> Unit, scan: () -> Unit, share: (String) -> Unit, profile: ProfileStore) {
     var screen by rememberSaveable { mutableStateOf("chats") }
     var preview by rememberSaveable { mutableStateOf(false) }
@@ -21,31 +21,27 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
     var settingsPage by rememberSaveable { mutableStateOf("") }
     var controlsBack by rememberSaveable { mutableStateOf("network") }
     var pairingBack by rememberSaveable { mutableStateOf("chats") }
-    var legacyBack by rememberSaveable { mutableStateOf("connections") }
     var profileBack by rememberSaveable { mutableStateOf("chats") }
     var reduceMotion by rememberSaveable { mutableStateOf(false) }
+    var previewDraft by rememberSaveable { mutableStateOf("") }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val primary = screen in listOf("chats", "network", "settings")
     val secureId = selectedChat.removePrefix("secure:").takeIf { selectedChat.startsWith("secure:") && !preview }
     val secureContact = secure.snapshot.contacts.firstOrNull { it.id == secureId }
-    val messages = if (preview) previewConversation(selectedChat) else if (secureId != null) secure.snapshot.history.filter { it.contact == secureId }.map { it.message } else session.messages.toList().let { stored ->
-        val attempt = session.lastAttempt
-        if (attempt != null && stored.none { it.id == attempt.id }) stored + attempt else stored
-    }
+    val messages = if (preview) previewConversation(selectedChat) else if (secureId != null) secure.snapshot.history.filter { it.contact == secureId }.map { it.message } else emptyList()
     val chat = if (preview) previewChats.firstOrNull { it.id == selectedChat } ?: previewChats.first()
-        else if (secureId != null) ChatSummary(selectedChat, secureContact?.name ?: "Retired contact", secureContact?.phase ?: "Session retired") else liveChat(session)
+        else if (secureId != null) ChatSummary(selectedChat, secureContact?.name ?: "Retired contact", secureContact?.phase ?: "Session retired") else ChatSummary("", "No conversation", "")
     val realChats = secure.snapshot.contacts.map { contact ->
         val latest = secure.snapshot.history.lastOrNull { it.contact == contact.id }?.message
         ChatSummary("secure:${contact.id}", contact.name, latest?.body ?: contact.phase, latest?.let { chatListTime(it.createdAt) }.orEmpty(), contact.unread)
-    } + liveChat(session)
+    }
     fun back() {
         screen = when (screen) {
             "details", "group", "contact_identity" -> "conversation"
             "pairing" -> pairingBack
             "profile" -> profileBack
             "licences" -> "preference"
-            "legacy_connections" -> legacyBack
             "connections" -> controlsBack
             "preference" -> "settings"
             else -> "chats"
@@ -54,13 +50,12 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
     fun connections(parent: String) { controlsBack = parent; screen = "connections" }
     fun pair() { secure.scannedQr = ""; pairingBack = screen; screen = "pairing" }
     fun profileScreen() { profileBack = screen; screen = "profile" }
-    fun legacy() { legacyBack = screen; screen = "legacy_connections" }
     LaunchedEffect(screen, preview) {
         focus.clearFocus()
         if (screen != "conversation") keyboard?.hide()
     }
     LaunchedEffect(screen, messages.size, preview, secureId) {
-        if (!preview && screen == "conversation") { if (secureId != null) secure.markRead(secureId) else session.markRead() }
+        if (!preview && screen == "conversation") { if (secureId != null) secure.markRead(secureId) }
     }
     BackHandler(enabled = screen != "chats" || preview) {
         if (screen == "chats" && preview) preview = false else back()
@@ -89,29 +84,28 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
                     myName = profile.name, myColour = avatarColour(profile.colour), link = link,
                     linkActive = secure.internetConnected || secure.localPeers > 0,
                     openProfile = { profileScreen() }, openLink = { connections("chats") })
-                "conversation" -> ConversationScreen(chat, messages, preview, if (secureId != null) secure.draft else session.draft,
-                    { if (secureId != null) secure.draft = it else session.draft = it }, if (secureId != null) secure.busy else session.pendingText != null,
-                    if (secureId != null) secureContact?.phase ?: secure.status else session.status,
-                    if (secureId != null) ({ secure.send(secureId) }) else send,
+                "conversation" -> ConversationScreen(chat, messages, preview, if (secureId != null) secure.draft else previewDraft,
+                    { if (secureId != null) secure.draft = it else previewDraft = it }, secureId != null && secure.busy,
+                    if (secureId != null) secureContact?.phase ?: secure.status else "",
+                    // The sample conversations in the design preview never send anything.
+                    if (secureId != null) ({ secure.send(secureId) }) else ({}),
                     back = { back() }, controls = { if (secureId != null) screen = "contact_identity" else connections("conversation") },
                     group = { screen = "group" }, details = { selectedMessage = it; screen = "details" },
                     maxBytes = if (secureId != null) 4096 else 20,
                     sendEnabled = secureId == null || secureContact?.ready == true && !secure.locked,
                     secure = secureId != null)
-                "network" -> NetworkScreen(session, preview, reduceMotion, manage = { connections("network") }, meshPeers = secure.localPeers, internet = secure.internetConnected, meshVisible = secure.meshDiscoverable, meshLinks = secure.localLinks)
+                "network" -> NetworkScreen(preview, reduceMotion, manage = { connections("network") }, meshPeers = secure.localPeers, internet = secure.internetConnected, meshVisible = secure.meshDiscoverable, meshLinks = secure.localLinks)
                 "settings" -> SettingsScreen(profile, openProfile = { profileScreen() }, open = { settingsPage = it; screen = "preference" },
                     preview = { preview = true; selectedChat = "ravi"; screen = "chats" })
                 "preference" -> when {
                     !preview && settingsPage == "Privacy & identity" -> SecureIdentityScreen(secure, pair = { pair() }, back = { back() })
                     !preview && settingsPage == "Data & storage" -> SecureStorageScreen(secure, back = { back() })
-                    !preview && settingsPage == "Network & connections" -> SecureConnectionsScreen(secure, discoverMesh, legacy = { legacy() }, back = { back() })
+                    !preview && settingsPage == "Network & connections" -> SecureConnectionsScreen(secure, discoverMesh, back = { back() })
                     !preview && settingsPage == "About Yap" -> AboutMessagingScreen(licences = { screen = "licences" }, back = { back() })
-                    else -> PreferenceScreen(settingsPage, session, preview, reduceMotion,
+                    else -> PreferenceScreen(settingsPage, preview, reduceMotion,
                         { reduceMotion = it }, back = { back() }, network = { connections("settings") })
                 }
-                "connections" -> if (preview || controlsBack == "conversation" && secureId == null) ConnectionScreen(session, preview, discover, back = { back() })
-                    else SecureConnectionsScreen(secure, discoverMesh, legacy = { legacy() }, back = { back() })
-                "legacy_connections" -> ConnectionScreen(session, preview, discover, back = { back() })
+                "connections" -> SecureConnectionsScreen(secure, discoverMesh, back = { back() })
                 "pairing" -> PairingScreen(secure, scan, share, discoverMesh, profile.name, back = { back() })
                 "profile" -> ProfileScreen(profile, secure.snapshot.identity, addFriend = { pair() }, back = { back() })
                 "contact_identity" -> SecureContactScreen(secureContact, secure, share, back = { back() })

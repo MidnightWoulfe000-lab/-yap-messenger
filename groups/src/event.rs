@@ -1,6 +1,6 @@
 //! Signed governance events and their canonical encoding.
 
-use crate::keys::{context, DeviceKey, Identity, MemberKey};
+use crate::keys::{context, Identity, MemberKey};
 use crate::wire::{Reader, Writer};
 use crate::{Error, Result};
 use rand_core::{OsRng, RngCore};
@@ -259,13 +259,6 @@ pub enum Body {
     VoteRevoke {
         proposal: Hash,
     },
-    AddDevice {
-        device: DeviceKey,
-    },
-    /// A member may revoke their own device at any time, without a vote (§5).
-    RevokeOwnDevice {
-        device: DeviceKey,
-    },
 }
 
 impl Body {
@@ -319,14 +312,6 @@ impl Body {
             Body::VoteRevoke { proposal } => {
                 w.u8(7);
                 w.fixed(proposal);
-            }
-            Body::AddDevice { device } => {
-                w.u8(8);
-                w.fixed(&device.0);
-            }
-            Body::RevokeOwnDevice { device } => {
-                w.u8(9);
-                w.fixed(&device.0);
             }
             Body::Override {
                 proposal,
@@ -425,12 +410,6 @@ impl Body {
             },
             7 => Body::VoteRevoke {
                 proposal: r.array()?,
-            },
-            8 => Body::AddDevice {
-                device: DeviceKey(r.array()?),
-            },
-            9 => Body::RevokeOwnDevice {
-                device: DeviceKey(r.array()?),
             },
             10 => Body::Override {
                 proposal: r.array()?,

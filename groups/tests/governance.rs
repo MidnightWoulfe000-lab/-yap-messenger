@@ -269,13 +269,6 @@ fn active_member_cannot_be_proposed() {
 fn revoked_member_can_come_back_through_a_new_proposal() {
     let (mut log, p) = group_of(3, true, true);
     let target = &p[2];
-    let old_phone = DeviceKey([5; 32]);
-    let lost_phone = DeviceKey([6; 32]);
-    for device in [old_phone, lost_phone] {
-        log.append(target, Body::AddDevice { device }).unwrap();
-    }
-    log.append(target, Body::RevokeOwnDevice { device: lost_phone })
-        .unwrap();
     let r = revoke(&mut log, &p[0], &p[1], target);
 
     // The normal rules apply: an objection still blocks.
@@ -301,14 +294,6 @@ fn revoked_member_can_come_back_through_a_new_proposal() {
     assert_eq!(member.earlier_terms.len(), 1);
     assert_eq!(member.earlier_terms[0].revocation, r);
     assert_eq!(member.earlier_terms[0].sponsor, Some(p[0].key()));
-
-    // Their old phone works again; the one they revoked themselves does not.
-    assert!(member.devices.contains(&old_phone));
-    assert!(member.revoked_devices.contains(&lost_phone));
-    let reuse = log
-        .append(target, Body::AddDevice { device: lost_phone })
-        .unwrap();
-    assert_eq!(log.is_valid(&reuse), Some(false));
 }
 
 #[test]
@@ -330,23 +315,6 @@ fn a_proposal_from_an_earlier_absence_cannot_be_reused() {
     let stale = admit(&mut log, &p[0], second);
     assert_eq!(log.is_valid(&stale), Some(false));
     assert!(!log.state().unwrap().is_active(&c.key()));
-}
-
-#[test]
-fn self_device_revocation_needs_no_vote() {
-    let (mut log, a, b) = new_group(true, true);
-    let phone = DeviceKey([5; 32]);
-    log.append(&a, Body::AddDevice { device: phone }).unwrap();
-    let theirs = log
-        .append(&b, Body::RevokeOwnDevice { device: phone })
-        .unwrap();
-    assert_eq!(log.is_valid(&theirs), Some(false));
-    let mine = log
-        .append(&a, Body::RevokeOwnDevice { device: phone })
-        .unwrap();
-    assert_eq!(log.is_valid(&mine), Some(true));
-    let me = &log.state().unwrap().members[&a.key()];
-    assert!(me.devices.is_empty() && me.revoked_devices.contains(&phone));
 }
 
 #[test]

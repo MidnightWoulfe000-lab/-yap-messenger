@@ -20,43 +20,16 @@ class MessageDetailsUiTest {
     }
     @get:Rule val compose = createComposeRule()
 
-    @Test fun liveBluetoothAcknowledgementDoesNotRenderARecipientReceipt() {
-        val session = ChatSession { 1000L }
-        session.draft = "Real message"
-        session.beginSend()
-        session.onBluetoothUpdate("Message delivered to the other phone.")
-        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}, secure = secure, discoverMesh = {}, scan = {}, share = {}, profile = profile) } }
-        compose.onNodeWithText("Nearby Yap phone").performScrollTo().performClick()
-        compose.onNodeWithText("Real message").performScrollTo().performClick()
-        compose.onNodeWithText("Recipient receipt not confirmed").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Recipient acknowledged receipt").assertDoesNotExist()
-        compose.onNodeWithText("Queued").assertDoesNotExist()
-    }
-
-    @Test fun previewCannotSendOrClearLiveHistory() {
-        val session = ChatSession()
-        session.onBluetoothUpdate("Message received: Keep this")
-        var sends = 0
-        var discover = 0
-        compose.setContent { YapTheme { YapApp(session, send = { sends++ }, discover = { discover++ }, secure = secure, discoverMesh = {}, scan = {}, share = {}, profile = profile) } }
+    @Test fun previewCannotSend() {
+        compose.setContent { YapTheme { YapApp(secure = secure, discoverMesh = {}, scan = {}, share = {}, profile = profile) } }
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Preview the full design").performScrollTo().performClick()
         compose.onNodeWithText("Ravi").performScrollTo().performClick()
         compose.onNodeWithContentDescription("Send").assertIsNotEnabled()
-        compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithText("Data & storage").performScrollTo().performClick()
-        compose.onNodeWithText("Clear this session").performScrollTo().assertIsNotEnabled()
-        compose.runOnIdle {
-            assertEquals(0, sends)
-            assertEquals(0, discover)
-            assertEquals("Keep this", session.messages.single().body)
-        }
     }
 
-    @Test fun networkKeepsYourPhoneCentredWhenAPeerIsSeen() {
-        val session = ChatSession()
-        compose.setContent { YapTheme { YapApp(session, send = {}, discover = {}, secure = secure, discoverMesh = {}, scan = {}, share = {}, profile = profile) } }
+    @Test fun networkKeepsYourPhoneCentred() {
+        compose.setContent { YapTheme { YapApp(secure = secure, discoverMesh = {}, scan = {}, share = {}, profile = profile) } }
         compose.onNodeWithText("Network").performClick()
         fun checkCentre() {
             val map = compose.onNodeWithTag("network-map").fetchSemanticsNode().boundsInRoot
@@ -64,12 +37,6 @@ class MessageDetailsUiTest {
             assertTrue("Phone must stay horizontally centred", kotlin.math.abs(map.center.x - phone.center.x) <= 1f)
             assertTrue("Phone must stay vertically centred", kotlin.math.abs(map.center.y - phone.center.y) <= 1f)
         }
-        checkCentre()
-        compose.runOnIdle { session.onBluetoothUpdate("Message received: hi") }
-        compose.onNodeWithText("1 device seen").assertExists()
-        checkCentre()
-        compose.runOnIdle { session.onBluetoothUpdate("Connected. Sending message...") }
-        compose.onNodeWithText("Connected · Bluetooth").assertExists()
         checkCentre()
     }
 }

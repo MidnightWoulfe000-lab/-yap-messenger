@@ -12,7 +12,7 @@
 //! stands.
 
 use crate::event::{Body, Event, GroupId, GroupType, Hash, Settings, MAX_MEMBERS, MAX_PARENTS};
-use crate::keys::{DeviceKey, Identity, MemberKey};
+use crate::keys::{Identity, MemberKey};
 use crate::{Error, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -85,8 +85,6 @@ pub struct Member {
     /// The event that admitted them: genesis for founders, otherwise an Admit.
     /// This is their logical join time; no clock is involved.
     pub joined_at: Hash,
-    pub devices: BTreeSet<DeviceKey>,
-    pub revoked_devices: BTreeSet<DeviceKey>,
     pub status: MemberStatus,
     /// Earlier memberships that ended in revocation, oldest first. A revoked
     /// member can come back through a new proposal (§5).
@@ -613,8 +611,6 @@ impl Log {
         let founder = |sponsor| Member {
             sponsor,
             joined_at: genesis,
-            devices: BTreeSet::new(),
-            revoked_devices: BTreeSet::new(),
             status: MemberStatus::Active,
             earlier_terms: Vec::new(),
         };
@@ -842,11 +838,6 @@ fn check(state: &GroupState, event: &Event) -> bool {
                 && state.is_active(&r.target)
                 && r.electorate.contains(&author)
         }),
-        Body::AddDevice { device } => {
-            let me = &state.members[&author];
-            !me.devices.contains(device) && !me.revoked_devices.contains(device)
-        }
-        Body::RevokeOwnDevice { device } => state.members[&author].devices.contains(device),
     }
 }
 
@@ -1018,17 +1009,6 @@ fn apply(state: &mut GroupState, hash: Hash, stored: &Stored) {
             }
             carry(state, *proposal);
         }
-        Body::AddDevice { device } => {
-            if let Some(m) = state.members.get_mut(&author) {
-                m.devices.insert(*device);
-            }
-        }
-        Body::RevokeOwnDevice { device } => {
-            if let Some(m) = state.members.get_mut(&author) {
-                m.devices.remove(device);
-                m.revoked_devices.insert(*device);
-            }
-        }
     }
 }
 
@@ -1090,14 +1070,10 @@ fn admit_member(state: &mut GroupState, candidate: MemberKey, sponsor: MemberKey
     let mut member = Member {
         sponsor: Some(sponsor),
         joined_at: hash,
-        devices: BTreeSet::new(),
-        revoked_devices: BTreeSet::new(),
         status: MemberStatus::Active,
         earlier_terms: Vec::new(),
     };
-    // Coming back: keep the record of the earlier membership. Their old
-    // devices work again (user, 26 November 2026); a device they revoked
-    // themselves stays revoked.
+    // Coming back: keep the record of the earlier membership.
     if let Some(old) = state.members.remove(&candidate) {
         if let MemberStatus::Revoked { revocation } = old.status {
             member.earlier_terms = old.earlier_terms;
@@ -1107,8 +1083,6 @@ fn admit_member(state: &mut GroupState, candidate: MemberKey, sponsor: MemberKey
                 revocation,
             });
         }
-        member.devices = old.devices;
-        member.revoked_devices = old.revoked_devices;
     }
     state.members.insert(candidate, member);
 }

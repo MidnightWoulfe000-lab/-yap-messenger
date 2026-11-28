@@ -338,7 +338,7 @@ A disconnected subset **cannot discover revocations that happened elsewhere unti
 
 ## 13. Required design work before implementation
 
-Group encryption (items 2 and 6) has a proposal: [group-encryption-v1.md](proposals/group-encryption-v1.md). Its open points were reviewed by Claude, its author, on 26 November 2026 (not an independent review), and its new choice 11 is decided (user, 26 November 2026): a newcomer can see who has voted in a vote that is still open. Multiple devices per member are a planned future feature (user, 26 November 2026); for now, one device per member, and group encryption version 1 is built for that. Its choices were accepted by the user on 26 November 2026:
+Group encryption (items 2 and 6) has a proposal: [group-encryption-v1.md](proposals/group-encryption-v1.md). Its open points were reviewed by Claude, its author, on 26 November 2026 (not an independent review), and its new choice 11 is decided (user, 26 November 2026): a newcomer can see who has voted in a vote that is still open. Multiple devices per member are no longer planned (owner, 27 November 2026): one device per member, for good, and group encryption version 1 is built for that. Its choices were accepted by the user on 26 November 2026:
 - Newcomers cannot read messages from before they joined.
 - Once a phone knows a member is out, it drops their messages that arrive after that.
 - An invite QR works once, for 10 minutes at most.

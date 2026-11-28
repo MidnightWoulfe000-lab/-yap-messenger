@@ -38,12 +38,12 @@ internal fun MessageDetailsScreen(message: ChatMessage, preview: Boolean, back: 
                         else message.body, if (message.fileName != null) Icons.Default.Description else Icons.Default.ChatBubbleOutline)
                     Spacer(Modifier.height(24.dp))
                     if (message.mine) {
-                        TimelineStep(if (preview || message.secure) "Queued" else "Send started", if (message.secure) "Ciphertext saved on this phone" else if (preview) "Waiting for a nearby peer" else "Looking for a nearby Yap phone",
+                        TimelineStep("Queued", if (message.secure) "Ciphertext saved on this phone" else "Waiting for a nearby peer",
                             messageTime(message.createdAt), Icons.Default.Check, complete = true, colour = Lime)
-                        TimelineStep(if (message.secure) "Relayed" else if (preview) "Sent to peer" else "Bluetooth write", when {
-                            message.acknowledgedAt != null -> if (message.secure) "Durable custody acknowledged by a peer or relay" else if (preview) "Handed to a nearby device" else "Acknowledged by the Bluetooth peer"
+                        TimelineStep(if (message.secure) "Relayed" else "Sent to peer", when {
+                            message.acknowledgedAt != null -> if (message.secure) "Durable custody acknowledged by a peer or relay" else "Handed to a nearby device"
                             message.failureReason != null -> message.failureReason
-                            else -> if (message.secure) "Waiting for a connection or custody acknowledgement" else "Waiting for Bluetooth confirmation"
+                            else -> "Waiting for a connection or custody acknowledgement"
                         }, message.acknowledgedAt?.let(::messageTime).orEmpty(), Icons.Default.Hub,
                             complete = message.acknowledgedAt != null, colour = if (message.failureReason != null) Coral else Blue)
                         TimelineStep("Delivered", if (message.recipientReceiptAt != null) "Recipient acknowledged receipt" else "Recipient receipt not confirmed",
@@ -51,11 +51,11 @@ internal fun MessageDetailsScreen(message: ChatMessage, preview: Boolean, back: 
                             complete = message.recipientReceiptAt != null, colour = Lime, last = true)
                         InfoNote(if (message.recipientReceiptAt != null)
                             "Delivery confirms recipient receipt. It does not confirm the message was read."
-                            else if (message.secure) "Relay custody does not confirm recipient delivery or reading." else "A Bluetooth acknowledgement does not confirm recipient delivery or reading.")
+                            else "Relay custody does not confirm recipient delivery or reading.")
                     } else {
-                        TimelineStep("Received on this phone", if (message.secure) "Authenticated and saved from a paired key" else "Received over Bluetooth · Identity not checked", messageTime(message.createdAt),
-                            Icons.Default.Bluetooth, complete = true, colour = Lime, last = true)
-                        InfoNote(if (message.secure) "A device receipt was queued after durable acceptance. Reading is not reported." else "This records reception on this phone only. No read receipt was sent.")
+                        TimelineStep("Received on this phone", "Authenticated and saved from a paired key", messageTime(message.createdAt),
+                            Icons.Default.Hub, complete = true, colour = Lime, last = true)
+                        InfoNote("A device receipt was queued after durable acceptance. Reading is not reported.")
                     }
                 }
             }

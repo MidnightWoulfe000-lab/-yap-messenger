@@ -49,11 +49,11 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                     preview && chat.id == "maya" -> "Internet"
                     preview && chat.id == "updates" -> "Sample app updates"
                     secure -> if (sendEnabled) "Paired · end-to-end encrypted" else status
-                    else -> "Legacy Bluetooth · unencrypted"
+                    else -> "Sample conversation"
                 },
                     color = Soft, style = MaterialTheme.typography.labelMedium)
             }
-            IconButton(onClick = controls) { Icon(Icons.Default.MoreVert, if (secure) "Contact details" else "Bluetooth controls", tint = White) }
+            IconButton(onClick = controls) { Icon(Icons.Default.MoreVert, if (secure) "Contact details" else "Connection controls", tint = White) }
         }
         HorizontalDivider(color = Surface2)
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),

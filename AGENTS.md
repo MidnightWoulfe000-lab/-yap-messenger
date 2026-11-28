@@ -4,7 +4,7 @@ Yap is a free, open-source, offline-first messenger. Keep the code practical and
 
 ## Project decisions and security guardrails
 
-Before making architectural, messaging, identity, encryption, routing or group changes, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md), plus [docs/GROUP_MECHANICS.md](docs/GROUP_MECHANICS.md) for any group-related work. These preserve agreed direction but explicitly mark unresolved details. Never invent cryptographic or group-governance policy. Propose a written specification and obtain review before implementing it. The old unencrypted Bluetooth chat is removed in the mesh v3.1 update (owner, 27 November 2026); until then, keep it intact while redesigning the UI.
+Before making architectural, messaging, identity, encryption, routing or group changes, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md), plus [docs/GROUP_MECHANICS.md](docs/GROUP_MECHANICS.md) for any group-related work. These preserve agreed direction but explicitly mark unresolved details. Never invent cryptographic or group-governance policy. Propose a written specification and obtain review before implementing it. The old unencrypted Bluetooth chat has been removed (owner, 27 November 2026); all messaging goes through the encrypted endpoint.
 
 Security audit findings, status and rules for follow-up work are in [docs/audit/2026-11-25-security-audit.md](docs/audit/2026-11-25-security-audit.md). Read it before changing the endpoint, native bridge, relay or Bluetooth mesh code. Nearby messaging (Bluetooth and Wi-Fi) is described in [docs/proposals/local-mesh-v2.md](docs/proposals/local-mesh-v2.md): nothing sent to nearby strangers may be permanent or trackable, and users should only ever see one "nearby messaging" switch.
 
@@ -12,7 +12,7 @@ Security audit findings, status and rules for follow-up work are in [docs/audit/
 
 The nearby messaging system (Bluetooth, Wi-Fi, Wi-Fi Aware, Wi-Fi Direct and the mesh that joins them) took a lot of work and is working. **UI and design work must not change it.** Screens may call it as they do now, but must not edit, move, rename, reformat or delete these files, or change their behaviour:
 
-- Android mesh and transport: `LocalMesh.kt`, `MeshHub.kt`, `MeshService.kt`, `MeshLog.kt`, `MeshBluetooth.kt`, `MeshWifi.kt`, `MeshWifiAware.kt`, `MeshWifiDirect.kt`, `FloodGuard.kt`, `EffortStamp.kt`, `YapBluetooth.kt`, `ChatSession.kt`
+- Android mesh and transport: `LocalMesh.kt`, `MeshHub.kt`, `MeshService.kt`, `MeshLog.kt`, `MeshBluetooth.kt`, `MeshWifi.kt`, `MeshWifiAware.kt`, `MeshWifiDirect.kt`, `FloodGuard.kt`, `EffortStamp.kt`
 - Android encryption, relay and storage: `SecureModel.kt`, `EndpointRepository.kt`, `NativeBridge.kt`, `InternetRelay.kt`, `BoundedWebSocket.kt`
 - Their tests in `android/app/src/test/` and `android/app/src/androidTest/`
 - Permissions, services and receivers in `AndroidManifest.xml`
@@ -41,4 +41,4 @@ For UI changes, check hierarchy, contrast, text scaling, touch targets, reduced 
 
 ## Engineering
 
-Before changing paired Android messaging, read [the endpoint contract](docs/android-endpoint-v1.md) and [release boundaries](docs/debug-release-0.2.md). Until the legacy chat is removed in the mesh v3.1 update, keep the experimental encrypted endpoint separate from it. Never infer an independent audit, physical multi-hop validation or production readiness from emulator tests.
+Before changing paired Android messaging, read [the endpoint contract](docs/android-endpoint-v1.md) and [release boundaries](docs/debug-release-0.2.md). Never infer an independent audit, physical multi-hop validation or production readiness from emulator tests.

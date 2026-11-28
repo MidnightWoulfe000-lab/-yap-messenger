@@ -9,18 +9,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.ViewModelProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
-    private lateinit var bluetooth: YapBluetooth
-    private val session by lazy { ViewModelProvider(this)[ChatSession::class.java] }
     private val secure by lazy { SecureModel.get(application) }
     private val profile by lazy { ProfileStore(applicationContext) }
     private val scan = registerForActivityResult(ScanContract()) { result -> result.contents?.let { secure.scannedQr = it } }
     private var permissionAction: (() -> Unit)? = null
-    private var acceptsBluetoothUpdates = false
+    private var batteryPrompt by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,30 +28,27 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.rgb(13, 16, 24)),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.rgb(13, 16, 24))
         )
-        bluetooth = YapBluetooth(this) { update ->
-            runOnUiThread { if (acceptsBluetoothUpdates) session.onBluetoothUpdate(update) }
-        }
         setContent {
             YapTheme {
-                YapApp(session,
-                    send = { withBluetoothPermissions { session.beginSend()?.let(bluetooth::send) } },
-                    discover = { withBluetoothPermissions { secure.disableMesh(); bluetooth.startAdvertising() } },
+                YapApp(
                     secure = secure,
                     // Wi-Fi works without Bluetooth permission, so nearby messaging turns on either way.
-                    discoverMesh = { withBluetoothPermissions(optional = true) { bluetooth.stop(); secure.enableMesh() } },
+                    discoverMesh = { withBluetoothPermissions(optional = true) { secure.enableMesh(); if (BatteryPrompt.shouldAsk(this)) batteryPrompt = true } },
                     scan = { scan.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setBeepEnabled(false)
                         // Yap codes are light on dark, so accept inverted codes as well as normal ones.
                         .addExtra(com.google.zxing.client.android.Intents.Scan.SCAN_TYPE, com.google.zxing.client.android.Intents.Scan.MIXED_SCAN)
                         .setCaptureActivity(PortraitCaptureActivity::class.java).setOrientationLocked(true).setPrompt("Scan the other phone's Yap code. Tap the screen to focus.")) },
                     share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share public pairing package")) },
                     profile = profile)
+                if (batteryPrompt) BatteryPromptDialog(
+                    dismiss = { batteryPrompt = false; BatteryPrompt.markAsked(this) },
+                    allow = { batteryPrompt = false; BatteryPrompt.request(this) })
             }
         }
     }
 
     override fun onStart() {
         super.onStart()
-        acceptsBluetoothUpdates = true
         secure.setForeground(true)
     }
 
@@ -84,16 +81,12 @@ class MainActivity : ComponentActivity() {
             val bluetoothGranted = permissions.indices.all { permissions[it] == Manifest.permission.POST_NOTIFICATIONS || grantResults.getOrNull(it) == PackageManager.PERMISSION_GRANTED }
             if (grantResults.isNotEmpty() && bluetoothGranted) action?.invoke()
             else if (permissionOptional) action?.invoke() // continue with whatever was granted
-            else session.status = "Bluetooth permission is needed. Allow the requested permissions and try again."
         }
     }
 
     override fun onStop() {
-        acceptsBluetoothUpdates = false
         permissionAction = null
-        bluetooth.stop()
         secure.setForeground(false)
-        session.onStopped()
         super.onStop()
     }
 }

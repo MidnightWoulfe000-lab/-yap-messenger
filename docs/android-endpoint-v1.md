@@ -104,7 +104,7 @@ accepted-message cache so loss/crash can be recovered by retransmitting the text
 > v2 adds Wi-Fi, replaces the routing token on the link with a rotating random link
 > ID, and stops broadcasting pairing bundles. The paragraphs below describe v1.
 
-Keep the legacy GATT service intact and explicitly separate. New local discovery
+The old unencrypted chat that used a separate GATT service has been removed. Local discovery
 uses UUID `a6f0c9e1-5b2d-4f8e-9a17-3c6d0e2b4201`; its metadata characteristic
 `a6f0c9e1-5b2d-4f8e-9a17-3c6d0e2b4202` contains version byte 1, a two-byte PSM
 and the 16-byte routing token. Android 10+ uses LE L2CAP CoC with bounded framed
