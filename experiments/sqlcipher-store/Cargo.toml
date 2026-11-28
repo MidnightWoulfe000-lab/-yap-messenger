@@ -1,0 +1,17 @@
+[package]
+name = "yap-sqlcipher-store"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-only"
+description = "Gate 1 feasibility check for local-storage-v1 section 5; not linked into the Yap app"
+
+[dependencies]
+# rusqlite with SQLCipher *linked* (feature `sqlcipher`), not rusqlite's own bundled
+# build: the stock `bundled-sqlcipher` feature needs OpenSSL, which this machine cannot
+# build. ltc-sys builds the same SQLCipher release with LibTomCrypt instead.
+rusqlite = { version = "=0.43.0", default-features = false, features = ["sqlcipher", "hooks", "functions"] }
+libsqlite3-sys = { version = "=0.40.0", default-features = false, features = ["sqlcipher", "bundled_bindings"] }
+
+[workspace]
+members = ["ltc-sys"]

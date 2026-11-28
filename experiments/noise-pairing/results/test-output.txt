@@ -1,0 +1,16 @@
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test psk_is_order_independent_and_32_bytes ... ok
+test snow_does_not_enforce_the_48_byte_rule_itself ... ok
+test bundle_of_1883_bytes_fits_in_one_message ... ok
+test full_original_exchange ... ok
+test wrong_psk_fails_at_the_first_message ... ok
+test replayed_or_out_of_order_handshake_and_transport_messages_fail ... ok
+test full_resume_exchange ... ok
+test resume_with_wrong_original_hash_or_original_prologue_fails ... ok
+test transport_maximum_is_65535_bytes_with_tag ... ok
+test message_one_is_refused_if_changed_truncated_or_extended ... ok
+test wrong_prologue_fails_at_the_first_message ... ok
+test message_two_is_refused_if_changed_or_truncated ... ok
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

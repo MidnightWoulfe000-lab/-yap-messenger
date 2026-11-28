@@ -1,0 +1,44 @@
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test changed_page_fails_to_read_and_integrity_check_reports_it ... TAMPER ciphertext: first read error: database disk image is malformed
+TAMPER ciphertext: 34 reads failed, 6 succeeded
+TAMPER ciphertext: cipher_integrity_check -> ["HMAC verification failed for page 10"]
+TAMPER hmac tail: first read error: database disk image is malformed
+TAMPER hmac tail: 34 reads failed, 6 succeeded
+TAMPER hmac tail: cipher_integrity_check -> ["HMAC verification failed for page 10"]
+TAMPER page 1 (salt): file is not a database
+test harness_sanity ... Outcome { op: InsertSession, variant: Fresh, config: Config { cache_spill: true, cache_size_pages: None }, estimate_pages: 272, hook_calls: 1, frames_by_hook: 134, frames_by_file: 134, peak_extra_pages_sampled: 135, peak_extra_pages_polled: 135, peak_wal_bytes: 552112, peak_other_bytes: 0, log_len_at_start: 0, checkpoint_result: (0, 0, 0), frames_ok: true, peak_ok: true, hook_ok: true, cross_check_ok: true }
+test hook_error_after_commit_does_not_roll_back ... HOOK ERROR: INSERT returned Err(SqliteFailure(Error { code: Unknown, extended_code: 1 }, Some("SQL logic error")))
+HOOK ERROR: rows after reopen = 1
+test pinned_settings_are_applied ... SETTING sqlite_version() = 3.54.1
+SETTING cipher_version = 4.20.0 community
+SETTING cipher_provider = libtomcrypt
+SETTING cipher_provider_version = 1.18.2
+SETTING cipher_page_size = 4096
+SETTING page_size = 4096
+SETTING cipher_memory_security = 1
+SETTING journal_mode = wal
+SETTING synchronous (2 = FULL) = 2
+SETTING auto_vacuum (2 = INCREMENTAL) = 2
+SETTING secure_delete = 1
+SETTING cipher_hmac_algorithm = HMAC_SHA512
+SETTING cipher_kdf_algorithm = PBKDF2_HMAC_SHA512
+SETTING cipher_kdf_iter = error: Query returned no rows
+SETTING cipher_use_hmac = 1
+SETTING cipher_plaintext_header_size = 0
+SETTING cache_spill = 483
+SETTING cache_size = -2000
+SETTING wal_autocheckpoint = 1000
+SETTING temp_store (0 default, 1 file, 2 memory) = 0
+SETTING compile_option = DEFAULT_WAL_AUTOCHECKPOINT=1000
+SETTING compile_option = DEFAULT_WAL_SYNCHRONOUS=2
+SETTING compile_option = HAS_CODEC
+SETTING compile_option = TEMP_STORE=2
+SETTING compile_option = THREADSAFE=1
+test raw_key_round_trip_wrong_key_and_no_plaintext ... WRONG KEY: file is not a database
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+running 0 tests
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

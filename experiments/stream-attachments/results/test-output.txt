@@ -1,0 +1,19 @@
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test empty_file_is_one_empty_last_segment ... ok
+test manifest_equations ... ok
+test fixed_vector ... ok
+test wrong_key_or_nonce_fails ... ok
+test final_segment_swapped_with_an_earlier_one_fails ... ok
+test reordered_segments_fail ... ok
+test hand_built_nonce_layout_matches_stream ... ok
+test flipped_bit_in_any_segment_fails ... ok
+test truncated_mid_segment_fails ... ok
+test non_final_presented_as_last_and_extension_fail ... ok
+test truncated_on_a_segment_boundary_fails ... ok
+test exact_multiples_have_no_extra_segment ... ok
+test both_crate_families_agree ... ok
+test size_table ... ok
+test round_trip_every_size ... ok
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

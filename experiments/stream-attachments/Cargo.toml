@@ -1,0 +1,18 @@
+[package]
+name = "yap-stream-attachments"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-only"
+description = "Gate 5 feasibility check for attachments-v1 section 1; not linked into the Yap app"
+
+[dependencies]
+# Candidate pair A (what the proposal names): the `aead-stream` crate with the
+# matching chacha20poly1305. Both sit on `aead` 0.6.
+aead-stream = { version = "=0.6.0", features = ["alloc"] }
+chacha20poly1305 = "=0.11.0"
+# Candidate pair B (what the outer layer pins today): chacha20poly1305 0.10.1,
+# whose own `stream` feature is the same STREAM code on `aead` 0.5. Used only to
+# cross-check that both produce identical bytes.
+chacha20poly1305_old = { package = "chacha20poly1305", version = "=0.10.1", features = ["stream"] }
+sha2 = "=0.10.9"

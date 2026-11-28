@@ -1,0 +1,3 @@
+# Built SQLCipher archives written by ltc-sys/build.rs
+/lib/
+/target/

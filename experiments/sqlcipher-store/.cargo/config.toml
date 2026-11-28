@@ -1,0 +1,7 @@
+# libsqlite3-sys links a static `sqlcipher` from here. ltc-sys writes the archive to
+# lib/<target>/ (build it first: cargo build -p yap-sqlcipher-ltc-sys). The process
+# environment wins over this file, so build-android.ps1 can point it at other targets.
+[env]
+SQLCIPHER_STATIC = "1"
+SQLCIPHER_LIB_DIR = { value = "lib/x86_64-pc-windows-msvc", relative = true }
+SQLCIPHER_INCLUDE_DIR = { value = "ltc-sys", relative = true }

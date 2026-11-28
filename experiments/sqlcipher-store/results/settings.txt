@@ -1,0 +1,25 @@
+sqlite_version() = 3.54.1
+cipher_version = 4.20.0 community
+cipher_provider = libtomcrypt
+cipher_provider_version = 1.18.2
+cipher_page_size = 4096
+page_size = 4096
+cipher_memory_security = 1
+journal_mode = wal
+synchronous (2 = FULL) = 2
+auto_vacuum (2 = INCREMENTAL) = 2
+secure_delete = 1
+cipher_hmac_algorithm = HMAC_SHA512
+cipher_kdf_algorithm = PBKDF2_HMAC_SHA512
+cipher_kdf_iter = error: Query returned no rows
+cipher_use_hmac = 1
+cipher_plaintext_header_size = 0
+cache_spill = 483
+cache_size = -2000
+wal_autocheckpoint = 1000
+temp_store (0 default, 1 file, 2 memory) = 0
+compile_option = DEFAULT_WAL_AUTOCHECKPOINT=1000
+compile_option = DEFAULT_WAL_SYNCHRONOUS=2
+compile_option = HAS_CODEC
+compile_option = TEMP_STORE=2
+compile_option = THREADSAFE=1
