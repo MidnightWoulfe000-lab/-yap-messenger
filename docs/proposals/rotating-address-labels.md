@@ -1,6 +1,7 @@
 # Proposal: rotating message address labels
 
-**Status: revised after two reviews; do not implement yet.** Per `AGENTS.md` this changes
+**Status: revised after two reviews, then touched again after Codex's fifth review of
+the v3.1 update (28 November 2026); do not implement yet and it needs another review.** Per `AGENTS.md` this changes
 how envelopes are addressed (a cryptographic protocol change), so it must be reviewed
 before any code is written. Tracks audit finding 1b. Codex reviewed it twice on 27
 November 2026 together with [local mesh v3.1](local-mesh-v3.1-group-envelopes.md); this
@@ -258,7 +259,9 @@ the label table here.
 - Fixed test vectors for the weekly step, `labelKey`, `linkKey`, `tag` and the kind
   `0x03` outer layer with the 70-byte binding.
 - Pair secret: both phones hold it when pairing completes; a pairing link closing
-  before then cancels pairing; pairing either side of a week boundary gives both phones
+  does not cancel pairing: the attempt resumes on another authenticated link within its
+  window (encrypted pairing §3) and is cancelled only before Confirmed or at the
+  deadline; pairing either side of a week boundary gives both phones
   the same starting week; both phones step to the same secret across one, two and ten
   weeks without meeting; a week's secret is deleted 26 hours after the week ends; a
   clock moved back never brings back a deleted secret; a crash during catch-up leaves a

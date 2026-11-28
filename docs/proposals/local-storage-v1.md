@@ -1,6 +1,7 @@
 # Proposal: local storage for your own messages, keys and groups
 
-**Status: draft for review; do not implement.** Per `AGENTS.md` this changes how keys and
+**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this changes how keys and
 messages are encrypted and saved on the phone, so it must be reviewed before any code is
 written. It ships in the same update as [local mesh v3.1](local-mesh-v3.1-group-envelopes.md)
 (owner, 27 November 2026). Every phone is re-paired in that update, so nothing is
@@ -173,26 +174,67 @@ counted before writing**, with room kept back for what must never be refused.
   and group data, **5 GB** for attachments (attachments §4). Raising either checks the
   phone's real free space first.
 - **The physical floor,** checked before every write transaction and every attachment
-  chunk, not only at start: Yap writes only while the phone has at least **1 GB** free
-  plus **256 MB** of headroom for its own database work. Counted record sizes are not
-  file sizes, so this check reads the real free space.
-  - Both databases use `auto_vacuum = INCREMENTAL`, so freed pages are returned a few
-    at a time and compaction never needs a second copy of the database.
-  - The write-ahead log is checkpointed after any commit that leaves it over 16 MB.
-    Read transactions for screens are short (one page of history each), so they never
-    hold the log open for long.
-  - **Below the floor**, in this order: stop accepting carried envelopes; then stop
-    accepting new incoming messages and attachments (not acknowledged, so senders
-    keep them); keep allowing receipts, deletions and the reserve's essentials; show
-    "Phone storage almost full". Another app filling the phone has the same effect.
+  chunk, not only at start, against the phone's real free space (counted record sizes
+  are not file sizes). Both stores draw on the same free space, so there are fixed
+  tiers (fifth review finding 7):
+
+  | Real free space | What may write |
+  | --- | --- |
+  | 1 GB + 512 MB or more | everything, including the carrier store |
+  | 1 GB + 256 MB or more | everything except new carried envelopes |
+  | 1 GB + 32 MB or more | only essentials (below), shrinking operations, checkpoints and space reclamation |
+  | less | only checkpoints, space reclamation and deleting files |
+
+  Before a transaction starts, its new bytes, doubled for the write-ahead log, must fit
+  between the free space and its tier's line; an ordinary transaction adds at most 4 MB
+  and an attachment chunk at most 64 KiB, so one write cannot jump a tier. Below the
+  second line the app shows "Phone storage almost full". Another app filling the phone
+  has the same effect. **No floor can guarantee progress** if another app takes all the
+  space: Yap then stops writing, keeps what it has committed, and says so.
+  - **Reclaiming space.** Both databases are created with `auto_vacuum = INCREMENTAL`
+    and `secure_delete = ON`. Setting the mode does nothing by itself: after any commit
+    that frees pages, a background step runs `PRAGMA incremental_vacuum(256)` (256
+    pages) at most once every 10 seconds until no free pages are left. A full `VACUUM`
+    is never run, because it rebuilds the database through a temporary copy that can
+    need up to twice its size.
+  - **The write-ahead log.** After any commit that leaves it over 16 MB, a passive
+    checkpoint runs. If it is still over **64 MB**, a truncating checkpoint waits up to
+    1 second for readers; if that fails too, ordinary writes to that store pause, as in
+    the third tier, until a checkpoint succeeds. Read transactions for screens are
+    short (one page of history each); the worker holds no read transaction across a
+    radio wait.
+  - **A failed commit** (disk full or an I/O error) is rolled back. Nothing it would
+    have acknowledged is acknowledged, the store moves to the tier the real free space
+    now gives, and the work is retried only after a later free-space check passes.
+  - Tests: another app filling the disk while both stores write; a blocked reader
+    holding the log; a commit failing with disk full; deleting a chat at each tier;
+    incremental reclamation after a large deletion.
 - **Kept back for essentials: 64 MB**, used only for receipts, acknowledgements,
   group key changes, governance events, pairing and the space accounting itself.
-  Whether something is an essential is known only after it is decrypted and
-  authenticated, so an envelope first passes the ordinary per-sender rate below; once
-  authenticated as an essential, it may use the reserve. Essentials have their own
-  limit of 1,000 an hour per contact or group sender, so the reserve cannot become an
-  unlimited path. Operations that only shrink the store (receipts that clear the
-  outbox, deletions) are always allowed, within the physical floor's headroom.
+  Operations that only shrink the store (receipts that clear the outbox, deletions)
+  are always allowed, within the physical floor's tiers.
+- **One admission order for incoming messages** (fifth review finding 8). Whether
+  something is an essential is known only after decryption, so:
+  1. **Work gate, before decryption:** at most 2,000 envelopes an hour from one contact
+     or group sender (known from the label), and 6,000 an hour in total, go on to be
+     decrypted. Over this, the envelope is not processed.
+  2. **Decrypt and authenticate** in memory, without committing anything.
+  3. **Classify.** An ordinary message counts against the ordinary rates (below): 1,000
+     an hour per sender, 3,000 in total. An essential counts against its own: 1,000 an
+     hour per sender, 3,000 in total, and may use the 64 MB reserve. So a receipt or
+     key change still gets through while the same contact floods ordinary messages.
+  4. **Commit** only if the message is within its rate and its storage tier allows it.
+     Otherwise nothing is committed (the session change included), so the sender's
+     retry is decrypted afresh later.
+
+  When storage is low, the same order runs: ordinary messages are decrypted under
+  step 1's limits but not committed; essentials are. **What a refusal withholds** is
+  the end-to-end acknowledgement (the receipt or piece acknowledgement that lets the
+  sender clear its outbox). The mesh `ACK` only ever means "this phone has handled the
+  envelope" (local mesh v3.1 §1.3) and may already have been sent, by this phone or an
+  earlier hop; a refusal never claims otherwise. Tests: a receipt and a justified key
+  change straight after a contact has used up its ordinary rate, then again with the
+  2 GB limit reached, then with real free space in the third tier.
 - **Each chat's share** at all times, not only near the limit: a chat (contact or
   group) may use at most the larger of **10%** of the limit and an equal share among
   chats active in the last 30 days. A chat at its share has new incoming messages
@@ -238,11 +280,11 @@ a SuperAdmin made it). `group_state` keeps the state at the current heads.
   (§7a).
 - **Leaving a group** deletes its log, state, sessions, pre-keys, keys, inboxes,
   pending pieces, history and attachments the same way.
-- After large deletions the database is compacted (`VACUUM`) so freed pages are reused;
-  space for that is kept free (§5).
+- After deletions, freed pages are overwritten (`secure_delete`) and returned to the
+  phone a few at a time by incremental reclamation (§5). A full `VACUUM` is never run.
 - Deleted records may survive on flash, and SQLCipher pages written before a deletion
-  stay readable to anyone who has both an old copy and the store key; compaction is not
-  secure erasure. The docs say so and do not promise otherwise. Signed group logs keep
+  stay readable to anyone who has both an old copy and the store key; neither
+  overwriting nor reclamation is secure erasure. The docs say so and do not promise otherwise. Signed group logs keep
   fallback inbox keys for as long as the log is kept (group encryption §3.11).
 
 ### 7a. Attachment files and the database
@@ -254,9 +296,23 @@ Files cannot be in a database transaction, so the order is fixed:
 - **Deleting:** commit the database change first, marking the file "to delete"; then
   delete the file; then remove the mark. At every start, marked files are deleted and
   marks cleared.
-- **At every start:** files with no reference are deleted; references whose file is
-  missing are shown as "Attachment missing". Nothing is sent or shown until this check
-  has run.
+- **Incoming attachments have their own states** (fifth review finding 11), stored
+  with the reference: **Receiving** (a staging file, with saved received ranges),
+  **Checking** (all bytes present, full validation running), **Published** (a
+  finished file, renamed to its final name as under "Adding") and **Deleting** (as
+  under "Deleting"). Only Receiving attachments hold a reservation that is not yet a
+  file, so reservations are recounted from Receiving rows only and a finished file is
+  never charged twice.
+- **Writing into a staging file:** write the bytes, sync the file, and only then commit
+  the range as received. A crash in between loses at most a range that is not yet
+  recorded, which is simply received again. A range is acknowledged to the sender only
+  after its commit.
+- **At every start:** files with no reference are deleted; for **Receiving**, a missing
+  staging file is recreated empty and its ranges reset (attachments §4), and an existing
+  one keeps its recorded ranges; **Checking** goes back to Receiving and is checked
+  again; a **Published** reference whose file is missing is shown as "Attachment
+  missing"; **Deleting** is finished. Nothing is sent or shown until this check has
+  run.
 
 ### 8. The clock check
 
@@ -294,7 +350,9 @@ groups, labels, weekly secrets and attachments.
    which is the same as if the time had really passed.
    **A "Yes" given by mistake cannot be undone,** because working time never goes back:
    messages that expired stay expired and deleted secrets stay deleted. The prompt says
-   so. The only way back is to re-pair the affected contacts.
+   so. The only way back is to re-pair the affected contacts. Re-pairing does not change
+   the phone's working time, so the prompt must not suggest that it does: it says only
+   that expired messages and deleted secrets stay gone.
 3. **Nearby phones can only cause a note.** Links do not send their clock by default.
    A phone whose working time and clock disagree by more than an hour may ask up to 5
    links for their time, rounded to the minute, at most once an hour. If most answers
@@ -306,6 +364,17 @@ groups, labels, weekly secrets and attachments.
    start, the working time is the later of the two stores' saved values, and both
    save the same working time from then on. If the phone stops between the two
    commits, the later value wins at the next start.
+
+5. **Implementation rules** (fifth review, clock assessment):
+   - **One serialised authority.** The endpoint worker owns the working time; the carrier
+     store asks it and never works time out itself.
+   - **The durable floor is the last committed value.** A value returned just before
+     power loss, but not yet committed, may not survive.
+   - **Recreating an empty carrier store** takes its floor from the endpoint store and
+     never resets it.
+   - **Arithmetic saturates** rather than overflowing.
+   - **If a store cannot be read,** nothing is expired, no labels are generated and the
+     carrier is not pruned until both stores are open or the carrier has been recreated.
 
 **Tests:** an advance of under 2 days followed by setting the clock back in the same
 run; a confirmed and a refused larger jump; a reboot; a crash between the two stores'
@@ -368,7 +437,10 @@ contact is re-paired.
 - Removing a contact leaves no record for it; clearing history removes its rows and
   attachments; a crash at each step of §7a leaves no orphan file and no dangling
   reference after the next start.
-- A changed page fails to open the database.
+- A changed page fails when that page is read (opening alone does not check every page).
+  A deliberate whole-file check runs SQLCipher's `PRAGMA cipher_integrity_check` at
+  start after an unclean shutdown and on demand. Not confirmed: the pragma name is from
+  memory of SQLCipher's documentation and must be checked against the pinned version.
 - Each first-start recovery case in §2 behaves as stated; a missing or wrong wrapped
   store key never creates a new identity over existing data.
 - Upgrade from 0.2 deletes every old file, alias, preference and the old carrier store.

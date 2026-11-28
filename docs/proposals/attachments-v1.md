@@ -1,6 +1,7 @@
 # Proposal: photos, voice notes and files
 
-**Status: draft for review; do not implement.** Per `AGENTS.md` this adds new encrypted
+**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this adds new encrypted
 content and new frames, so it must be reviewed before any code is written. It ships in
 the same update as [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) and
 [local storage](local-storage-v1.md) (owner, 27 November 2026).
@@ -90,8 +91,12 @@ that does not match the hash in the manifest is refused, whoever sent it.
   with the label it came under. When a manifest arrives, only held pieces from the same
   sender's label scope with the same attachment ID are used; the rest expire. A held
   piece's claimed total is not trusted: the manifest's size decides.
-- Once the staging file holds every byte, the manifest checks above run; if they fail,
-  the staging file is deleted.
+- Once the staging file holds every byte, the manifest checks above run (local storage
+  §7a, Checking). **If they fail,** the staging file is emptied and its received ranges
+  reset in one step, the reservation is kept, and the attachment receives again from
+  any copies still arriving. A second failure for the same attachment ends it: the file
+  is deleted, the reservation released, and it shows "Couldn't receive this
+  attachment".
 - **Same rules as messages:** each piece has its own effort stamp and follows the copy
   rules in mesh v3.1 §1.3. The receiver puts the pieces together, checks the hash and
   each chunk, and shows the attachment once all have arrived. Pieces that never all
@@ -131,7 +136,12 @@ that does not match the hash in the manifest is refused, whoever sent it.
   holds at most 60 KiB of the encrypted file at a stated offset, so it fits a frame.
 - **Resuming.** A dropped link ends the channel. On the next suitable link, a new
   handshake starts; the receiver says which byte ranges it already holds, and the
-  sender sends the rest. Received ranges are saved, so a restart resumes too.
+  sender sends the rest. Received ranges are saved only after their bytes are synced
+  (local storage §7a), so a restart resumes too and never claims a range it lacks.
+  Adjacent ranges are merged when saved, and an attachment keeps at most 256 separate
+  ranges: a chunk that would make a 257th is dropped and sent again later in order.
+  `FILE_CHUNK`s must start and end on 4 KiB boundaries, except the file's last one, so
+  tiny chunks cannot multiply the bookkeeping.
 - **What a listener sees:** that two phones are moving a lot of data. A link relayed
   between two places (mesh v3.1 §3.1) can carry the transfer, but only ever sees
   encrypted bytes; recognition never proves the friend is nearby.
@@ -175,10 +185,20 @@ native ingress limit of 1 MiB a minute or reduce last-copy radio traffic.
   10 minutes. Anything over a limit, or that fails to decode, shows "Can't show this
   here", with the choice to open it in another app or delete it. Files are never
   decoded by Yap.
-- **After a crash,** at start: a staging file with no accepted manifest is deleted; an
-  accepted manifest with no staging file gets a new empty one, and its received ranges
-  are reset, so it can still receive; reservations are recounted from the accepted
-  manifests.
+- **Checking a manifest before admitting it,** with checked arithmetic and before any
+  staging file or range is made: the segment count equals `max(1, ceil(n / 65,536))`
+  for the plaintext size `n`, the encrypted size equals `n + 16 × count`, and the
+  encrypted size is within its ceiling (§6). A manifest that fails any of these is
+  refused.
+- **After a crash,** at start, using the states in local storage §7a: a staging file
+  with no accepted manifest is deleted; a Receiving attachment with no staging file
+  gets a new empty one with its ranges reset; one whose file exists keeps its recorded
+  ranges, which were saved only after their bytes were synced; Checking goes back to
+  Receiving; reservations are recounted from Receiving attachments only.
+- Tests: power loss after a chunk is written but before its range is saved, and after
+  the range is saved; a partial file with recorded ranges; failed final validation,
+  then a retry, then a second failure; a crash during publication and during deletion;
+  a manifest whose size, count and encrypted size disagree; many tiny chunks.
 
 ### 5. Privacy and safety
 

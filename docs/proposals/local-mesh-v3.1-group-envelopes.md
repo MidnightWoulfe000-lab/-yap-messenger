@@ -1,6 +1,7 @@
 # Local mesh v3.1: group messages, message routes and friend names
 
-**Status: revised after two reviews; do not implement yet.** Codex reviewed this
+**Status: revised after two reviews, then updated after Codex's fifth review (28 November
+2026); do not implement yet and it needs another review.** Codex reviewed this
 proposal and [rotating address labels](rotating-address-labels.md) twice on 27 November
 2026: five High and nine Medium findings the first time, nine High and six Medium the
 second. This revision answers the second review and records the owner's decisions of
@@ -51,7 +52,7 @@ address is ignored. A "Coming soon" screen alone does not turn it off.
   `android/app/debug.keystore`, so anyone can make an app Android treats as Yap.
   Android does support signing-key rotation (APK Signature Scheme v3), but this update
   moves to a fresh private key instead of a rotation lineage, because everyone
-  reinstalls anyway and a clean start is simpler. This update moves to a private key: the owner creates it, keeps an offline backup,
+  reinstalls anyway and a clean start is simpler. This update moves to a private key: the owner creates it, keeps an offline backup and may keep one encrypted cloud copy (see `docs/signing.md`),
   and stores it as a GitHub Actions secret that CI writes out only while building. The
   public keystore is deleted from the repository. The debug updater keeps checking
   that an update carries the same key. Note that `DebugUpdater.checkSignature()` skips
@@ -372,12 +373,24 @@ the extra copy and drops it.
 
 **Budget.** A phone answers at most 600 offer entries a minute across all its links,
 counted over a rolling minute. Over that, it sends a busy `WANT`, which settles
-nothing, and the offer is retried later. **Fair shares:** the 600 are split equally
-between the links that sent offers in the last minute; a link that has used its share
-gets busy answers while others still have theirs, and any share left unused in the
-minute goes to whoever asks next. So no link can be starved by others, though under
-heavy load each link moves slowly. 600, 64 entries, and the retry times are starting
-values.
+nothing, and the offer is retried later. **Taking turns** (fifth review finding 9;
+this replaces the earlier equal-shares rule): an offer is answered whole or not at all
+(up to 64 entries; there are no partial answers). A link that gets a busy answer joins
+a **waiting line**, once, and retries every 5 seconds while it is in it. When budget
+comes free (entries answered more than a minute ago drop out of the count), it is held
+for the link at the front of the line for 10 seconds: only that link's next offer may
+use it, and only if the free budget covers that whole offer. A link that does not retry
+in those 10 seconds goes to the back. While anyone is waiting, a link not in the line
+gets busy answers. A link that closes leaves the line. So every link that keeps
+retrying is answered in turn; under heavy load each one moves slowly. This is
+best-effort progress, not a promise of speed. 600, 64 entries, 5 and 10 seconds are
+starting values. Tests: twelve links each offering 64 entries, links arriving and
+leaving while others wait, and one fast link against a slow retrying link.
+
+*A bounded-cache cost:* if a link's settled list has forgotten an envelope **and** the
+other phone has also forgotten that it saw it (its own caps), the envelope may be sent
+again in full, not just offered. Both caps keep this bounded; it is not a once-only
+cost.
 
 **What is still revealed, stated plainly** (accepted for this update, listed for
 review):
@@ -448,7 +461,8 @@ the delay matters.
 ### 1.8 Effort stamps
 
 Each group envelope needs its own stamp (18 bits, about 0.3 to 1 second on a phone).
-Batching keeps this small: a removal costs each member 1 to 5 stamps, not 126.
+Batching keeps this small: a removal costs each member 1 to 5 stamps in the one-event case, not 126, and at least
+six batches (six stamps) in the 16-event new-session case (group encryption §3.9).
 
 *For the reviewer, not decided:* since a sender picks its own starting copies, spam
 always takes the maximum. Because starting copies are now in the binding, and so in
@@ -648,6 +662,22 @@ operation has to be fixed. So:
   hiding forces) uses the new one. Making and checking a probe
   only read this table, so loading contacts, deriving keys and handling missing keys
   never happen while a link is waiting.
+- **No old sending keys after hiding or removing** (fifth review finding 3). The phone
+  keeps a **sending generation** number. Hiding from a friend, turning on "Hide me now"
+  or removing a contact raises it in the same store transaction as the change itself,
+  before the link-ID change closes the old links. Each sending table records the
+  generation and the week it was built for. A probe may use real sending keys only if
+  the published table's generation is the current one and its week is the current
+  working week. Otherwise the phone sends a filler `PROBE` from the pre-generated pool,
+  exactly as over a cap, until the new table is published. Probe-making work already
+  queued records the generation it started under and, if that has changed by the time
+  it finishes, sends filler instead. So a link that opens before the background rebuild
+  finishes can never send the withdrawn tag: friends just stay anonymous for that link.
+  Matching keys are not affected, so recognising friends who have not hidden carries
+  on.
+- Tests: the table worker deliberately stalled while hiding; a probe queued before
+  hiding; an immediate reconnect after hiding; deleting a contact; a link opened across
+  the week boundary.
 - **Making a probe** computes 128 HMACs from the sending keys, then replaces the filler
   places with random bytes and shuffles, as in §3.2.
 - **Checking a probe** computes 384 expected tags (the matching keys) and compares every
@@ -763,9 +793,14 @@ How it works:
   One thing can hint at hiding over time: big attachments between you and that friend
   never start, because they need recognition both ways
   ([attachments](attachments-v1.md) §3).
-- Hiding takes effect at once: the phone changes its link ID straight away, as it already
-  does every 10 to 20 minutes, which closes its links and opens new ones under the new
-  rules. A friend's phone loses the name with the old link.
+- Hiding takes effect at once: the sending generation goes up first (§3.3), so no new
+  link can send the withdrawn tag, then the phone changes its link ID straight away, as
+  it already does every 10 to 20 minutes, which closes its links and opens new ones
+  under the new rules. A friend's phone loses the name with the old link. A tag already
+  sent on an old link before the switch cannot be taken back.
+- A direct transfer checks both local switches (hidden, and whether the friend is still
+  a contact) again immediately before its handshake starts and before a paused
+  transfer resumes ([attachments](attachments-v1.md) §3).
 - Nothing is deleted. The keys behind recognition are made from the secret you share
   with each friend for your chats (§3.4), so deleting them would break the chats too.
   They are not needed: someone holding a friend's phone can only recognise tags you
@@ -863,7 +898,8 @@ Part 1:
   never increase the total copies; a crash at each step leaves counts no higher than
   before.
 - An envelope the other phone already has is never offered to it, for both classes; a
-  settled envelope is never offered again on that link; state clears on close.
+  settled envelope is not offered again on that link while it is remembered (cap
+  20,000 keys, §1.4); state clears on close.
 - Paging: a link sees every eligible envelope in a store holding more than 128 settled
   ones, with envelopes added and expiring during the walk. Two envelopes with equal
   message IDs but different bytes (destination, ciphertext, class, creation time) are

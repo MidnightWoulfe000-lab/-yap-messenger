@@ -1,6 +1,6 @@
 # Proposal: group encryption
 
-**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, a third found 4 and a fourth found 2; all are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design.
+**Status: revised after review; do not implement yet.** A Codex design review on 26 November 2026 found 16 problems. A second Codex review on 27 November 2026 found 6 more, a third found 4 and a fourth found 2; all are answered here too. This version answers all of them (see the [review](../audit/2026-11-26-group-encryption-v1-codex-review.md) and the [response](../audit/2026-11-26-group-encryption-v1-response.md)), but the changes need a second review, and part of finding 7 waits for the mesh design. Codex's fifth review of the v3.1 update (28 November 2026) led to further changes in §§3.2 and 3.11 (catch-up sessions, replay list, batch handling); these also need another review.
 
 **Status: proposal for review. Not implemented. No security audit.** Per `AGENTS.md`,
 encryption is not built from assumptions. The project owner has decided the
@@ -182,7 +182,10 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   work. A member who needs more (after a restore, say) waits a day.
 - When two members both open a session at once, the one with the smaller
   identity key (comparing bytes) is the initiator, as in contact pairing, and
-  the other session is dropped.
+  the other session is dropped. This rule compares only set-ups that **both
+  phones can read**. A set-up the receiver cannot open (its pre-key is gone) is
+  never a candidate, so it can never beat a working catch-up session (fifth
+  review finding 1). The recovery transitions are in 3.11.
 
 ### 3.3 Joining
 
@@ -558,28 +561,96 @@ S opens one from a bundle R has since replaced, so R cannot read S's set-up mess
 1. R finds the piece by its label, but cannot authenticate it, so it treats it only as
    a hint that S may need catching up.
 2. R opens a fresh session to **S's catch-up bundle** and sends S, to S's fallback
-   inbox, a catch-up piece holding R's current signed bundle and log heads.
+   inbox, a catch-up piece holding **only** R's current signed bundle and log heads
+   (the permitted first payload: see "The cost of keeping catch-up pre-keys").
 3. S can always read it (its catch-up pre-keys are kept), learns R's current bundle,
-   and the two resynchronise the missing log and keys over that session (3.7).
+   and replies over that session. Only after R has decrypted S's reply do the two
+   resynchronise the missing log, sender keys and pieces over it (3.7). Until then R
+   sends nothing else on that session.
 4. If R is the one behind, the same happens the other way round.
 
-So end-to-end catch-up works as long as both are still members: the address (fallback
-inbox) always reaches them, and the catch-up bundle always opens. If one of them has
-been removed in the meantime, or a phone lost its catch-up keys (a reset), the app
-shows "Out of step with <member>: ask to be re-invited".
+**Which session survives** (fifth review finding 1). These rules use only libsignal's
+own session record, which keeps one current session per peer and archives older ones:
+- **One side behind.** S's failed set-up was never readable, so R's catch-up set-up is
+  the only candidate, whatever the identity order. When S processes it, libsignal makes
+  it S's current session and archives S's own unanswered session to R. S stops
+  retrying its failed set-up from then on, and drops every piece it had queued for R
+  under the old session. It does not re-send those pieces. What R is missing is worked
+  out again from the log heads in step 2 and sent fresh over the new session (3.7).
+  Installing the new session, dropping that queue and recording the base key happen
+  in one store transaction, so a restart sees either the old state or the new one.
+- **Both behind at once.** Each phone fails to read the other's set-up, so each sends a
+  catch-up set-up to the other's catch-up bundle. Both of these are readable, so the
+  ordinary rule in 3.2 applies: the catch-up session opened by the smaller identity
+  key wins. The other phone archives its own catch-up session and sends its step 2
+  payload again over the winner. Nothing beyond step 2 has been sent on the losing
+  session, because step 3 waits for a reply.
+- **Lost replies.** R resends its step 2 piece, unchanged and on the same session, at
+  most once an hour (inside the answer limits below) until a reply arrives or 7 days
+  pass. Then R shows "Out of step with <member>: ask to be re-invited". A further hint
+  from S during that time does not start a second session.
+- **Tests:** both identity orders, both behind at once, a lost step 2 piece, a lost
+  reply, repeated hints, and a restart at each step: after the catch-up set-up is
+  sent, after it is installed, and after the first reply. All against the pinned
+  libsignal.
+
+So end-to-end catch-up is expected to work as long as both are still members: the
+address (fallback inbox) always reaches them, and the catch-up bundle is kept. That
+is a design intention, not a guarantee from key availability alone, until the tests
+above pass. If one of them has been removed in the meantime, a phone lost its catch-up
+keys (a reset), or the replay list below is full, the app shows "Out of step with
+<member>: ask to be re-invited".
 
 **Limits on step 1:** a failed set-up proves nothing about who sent it. A removed member
 still knows fallback inboxes and could fake failed set-ups naming active members to make
 phones do catch-up work. So a phone sends at most one catch-up answer per claimed sender
 per hour and at most 10 an hour in total, and the answer goes only to the claimed
-sender's own catch-up bundle and inbox, so a faker gets nothing readable. Base keys used
-with catch-up pre-keys are recorded for the whole membership, so a replayed catch-up
-set-up is refused (3.2).
+sender's own catch-up bundle and inbox, so a faker gets nothing readable.
 
-**The cost of keeping catch-up pre-keys:** someone who later takes the whole phone, with
-its identity key and catch-up pre-keys, and who recorded earlier catch-up set-up
-messages, could open those set-ups. They would already hold the phone's live sessions
-and chats, so this adds little.
+**Work before an answer** (fifth review finding 4). For every incoming set-up that
+names a catch-up pre-key, in this order: (1) the outer layer opens (proving knowledge
+of the inbox key); (2) the cheap check that the clear identity key belongs to an active
+member; (3) one unit is taken from that member's allowance of 4 new sessions a day
+(3.2), **whether or not the set-up then succeeds**, and the set-up is dropped if the
+allowance is used up; (4) a phone-wide limit of 64 set-up attempts an hour across all
+groups and contacts, checked at the same point; (5) only then the libsignal processing.
+A failed set-up whose pre-key is missing fails before the post-quantum work. Answers
+(step 2) are then limited as above. The cost is stated: a removed member who fakes
+set-ups naming S can use up S's allowance on this phone, so honest catch-up from S may
+wait up to a day.
+
+**The replay list** (decided, owner, 28 November 2026). Base keys used with my catch-up
+pre-keys are recorded for the whole membership, so a replayed catch-up set-up is
+refused (3.2). The list cannot be trimmed while the catch-up key exists, so it is
+capped at **256 records per other member** (about 20 KB; about 2.6 MB for a full
+128-member group), counted in the endpoint store's byte accounting (local storage §5).
+Records are never evicted. When one member's list is full, further catch-up set-ups
+from that member are refused before any libsignal work and the app shows "Out of step
+with <member>: ask to be re-invited". Catch-up should be rare, since it only follows
+long absences. If a record cannot be written (storage full), the set-up is refused,
+never accepted without its record. Tests: repeated failed hints, many valid distinct
+catch-up set-ups up to the cap and one past it, an exact replay after the session was
+lost and after a restart, and a full store.
+
+Today's endpoint adapter deletes a post-quantum pre-key when it is used, and the pinned
+libsignal in-memory store keeps its used-base-key list only in memory. Neither is the
+durable, kept-for-the-membership store described here. That store is new Yap code.
+
+**The cost of keeping catch-up pre-keys** (accepted, owner, 28 November 2026). Someone
+who records catch-up set-up messages from the air and later takes the whole phone, with
+its identity key and catch-up pre-keys, can open those recorded set-ups, including ones
+whose sessions and chats were deleted long ago. To keep that exposure small, **the only
+content allowed before the other phone's reply is step 2's payload**: the sender's
+signed bundle at that time (public keys, already shared with the group) and its log
+heads (which show how far it had got in the group log, not what the log says). Sender
+keys, missing log events and pieces are sent only after the reply, when the session
+has moved on to keys made fresh by both phones (libsignal's ratchet), which are not
+kept. That those later messages stay unreadable to such an attacker is expected from
+how libsignal works but **not yet shown**: a test against the pinned library must
+record catch-up traffic, the later hand-overs, deletion of keys and history, and then
+use the kept catch-up secrets, and report what can still be read. The separate
+cryptographic review of this trade-off is still needed. §4's claims about old messages
+apply to everything except the recorded step 2 payloads.
 
 **Piece labels and wrapping.** A piece from S to R:
 ```
@@ -641,10 +712,16 @@ Rules:
 - A phone that is not up to date with the destination label scans the `n` labels
   against its piece table: at most 128 lookups. For each match it tries to remove that
   piece's outer layer with each candidate key for that label (up to 4), stopping at the
-  first that opens, and at most 32 outer decryptions per envelope in all. **Only a
-  piece whose outer layer opens counts as "for me"** under local mesh v3.1 §1.3, so a
-  copied label in an invalid batch does not make the phone keep it. Past 32 attempts
-  the envelope counts as not for this phone.
+  first that opens. **Only a piece whose outer layer opens counts as "for me"** under
+  local mesh v3.1 §1.3, so a copied label in an invalid batch does not make the phone
+  keep it. Labels must be unique within one batch's directory; a repeated label makes
+  the batch invalid, refused whole.
+- **Total work per envelope** (fifth review finding 10): at most **32 outer decryptions
+  per envelope in all**, counting both the opening before the `ACK` (step 3 below) and
+  any on the worker (step 7). A piece whose outer layer opened is kept opened, in
+  memory, for the worker, and is never opened twice. When the 32 are used up: if at
+  least one piece opened, the phone keeps the envelope and processes the pieces that
+  opened; if none did, the envelope counts as not for this phone.
 - **The receive order** for any class 2 envelope, also referred to by local mesh v3.1
   §1.3: (1) frame, stamp and flood checks; (2) label lookup, destination first, then
   the batch directory; (3) for a batch matched only through the directory, the bounded
@@ -653,9 +730,22 @@ Rules:
   processing; (8) later still, the piece acknowledgement. Nothing in (7) or (8) changes
   the `ACK` already sent.
 - An envelope kept because its destination matched a **current group label** is kept
-  without opening (step 3 is skipped). If the member later fails to decrypt it under
-  that sender's key in step 7, it deletes its carried copy. A copied group label can
-  therefore make members carry junk until step 7, not beyond.
+  without opening (step 3 is skipped). What happens next depends on what it is
+  (fifth review finding 10):
+  - an **ordinary group message** (one sender-key ciphertext): if the member fails to
+    decrypt it under that sender's key in step 7, it deletes its carried copy;
+  - a **batch** (`YGB1`, a directory of separately wrapped pieces, with no
+    whole-batch encryption): kept or deleted on the container alone. If the directory
+    breaks any rule above, the carried copy is deleted. If it is valid, the batch is
+    carried for its lifetime whatever happens to this member's own piece: there may
+    be none in a smaller retry batch, or this member's may fail while another's is
+    good.
+  So a copied group label can make members carry junk until step 7 for a message, and
+  for a batch only one whose directory is valid.
+- Tests: a copied label in an invalid batch; a valid outer layer with invalid inner
+  content; a collision candidate that opens only on a later key; a current-label batch
+  with no piece for this member; a directory with a repeated label; and 33 matching
+  candidates in one envelope.
 - Each piece found is then opened on its own. A piece that fails its inner checks is
   skipped and logged; the other pieces are unaffected. A phone that kept the batch
   carries it unchanged, whatever happened to its piece.

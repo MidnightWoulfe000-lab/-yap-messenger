@@ -1,7 +1,8 @@
 # Proposal: encrypted pairing
 
-**Status: draft for review; do not implement.** Per `AGENTS.md` this is a cryptographic
-protocol change and must be reviewed before any code is written. It answers finding 5
+**Status: draft for review; do not implement.** Revised after Codex's fifth review of the
+v3.1 update (28 November 2026) and needs another review. Per `AGENTS.md` this is a
+cryptographic protocol change and must be reviewed before any code is written. It answers finding 5
 of the [second Codex review](../audit/2026-11-27-local-mesh-v3.1-second-review.md) of
 27 November 2026, and ships in the same update as
 [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) and
@@ -105,8 +106,31 @@ handshake is encrypted.
   for an attempt it has also scanned, answers by starting the handshake on that link.
   Anything else is ignored. Nothing else about the person travels in it.
 - **`PAIR_HANDSHAKE` (17) and `PAIR_DATA` (18),** each holding one Noise message,
-  accepted only on a link where a `PAIR_FIND` matched, or for an attempt in its resume
-  window.
+  accepted only on a link where a `PAIR_FIND` matched (below). There is no other way
+  in: resuming also starts with a matching `PAIR_FIND`.
+
+**Finding and dispatch** (fifth review finding 5). Each attempt keeps two discovery
+values: its **local commitment** (from its own QR, which the other phone sends) and its
+**remote commitment** (from the QR it scanned, which it sends). A phone looks up an
+incoming `PAIR_FIND` in two small lists:
+- the **shown QR**: the local commitment of the QR on screen now, while its attempt is
+  Scanned;
+- **retained attempts**: the local commitment of each attempt in its resume window,
+  at most 2. If a third attempt reaches Confirmed, the oldest retained one ends early
+  and is erased as at its deadline.
+
+Opening a new QR does not remove retained attempts. A `PAIR_FIND` body is exactly 33
+bytes (version 1, then 32 bytes); any other length or version is ignored before
+lookup. A match is on all 32 bytes, against at most 3 values, and **binds that link to
+exactly one attempt**. A `PAIR_HANDSHAKE` on a link with no bound attempt is dropped
+without any cryptographic work. On a bound link only that attempt's `psk` is tried,
+and the attempt's state picks which handshake runs: the original (prologue as above)
+if it is Scanned, the resume (§3) if it is Confirmed or later. Handshake messages carry
+no payload, so each is exactly 48 bytes (32-byte ephemeral key plus 16-byte tag); any
+other length is dropped. A bound link gets at most one handshake start per 10 seconds,
+and an attempt has at most 4 bound links at once. If two links both complete a resume
+handshake, the first to finish wins and the other is unbound. Nothing in these frames
+shows a permanent identity.
 - Today's cleartext `BUNDLE` and confirmation frames are removed, not kept as a
   fallback. Two attempts at once on the same link: the one started
 by the smaller identity key continues, the other is cancelled. The display name that
@@ -146,7 +170,8 @@ After the handshake, every pairing message is a Noise transport message on that 
 - **The resume window** runs to the attempt's ten-minute deadline, **whatever either
   phone's state**, including after it is Ready. Until then each phone keeps, saved so
   it survives a restart: the `psk`, the original handshake hash, both identity keys and
-  their roles, the commitment for `PAIR_FIND`, and the exact cached bootstrap bytes it
+  their roles, both discovery values (the local commitment it answers to and the remote
+  commitment it sends in `PAIR_FIND`), and the exact cached bootstrap bytes it
   may need to resend (the initiator's kind 03, the responder's kind 04). At the
   deadline all of these are erased, whatever the state.
 - **Resume:** within the window, a phone that is not Ready, or a Ready responder asked
@@ -171,7 +196,15 @@ After the handshake, every pairing message is a Noise transport message on that 
 
 All pairing packets stay in a queue bound to the attempt's current authenticated link:
 the first one, or the link of the latest successful resume handshake (rotating address
-labels §2).
+labels §2). When the queue moves, packets not yet handed to the old link are moved;
+packets already handed to it count as possibly sent and are sent again on the new link
+from the exact cached bytes, which the other phone handles as a repeat. The old link is
+then unbound, and pairing frames arriving on it are ignored.
+
+Tests for finding and dispatch: a Ready phone restarted with no QR open, then asked to
+resume; a new QR opened while an older attempt is still in its window; queued packets
+on a link that is replaced; two resume links at once; a third attempt pushing out the
+oldest retained one; a `PAIR_HANDSHAKE` on an unbound link; wrong-length frames.
 
 Transport messages are limited to Noise's 65,535 bytes; a public bundle is 1,883 bytes.
 
@@ -190,18 +223,29 @@ without meeting, through the group's own encrypted connection between them.
 1. A taps "Add as friend" on B in the group's member list. A's phone sends B a
    **friend request** as a group piece (group encryption §3.11), over their existing
    one-to-one group session: a random request ID, A's display name, a random 32-byte
-   pair secret and the starting week. A signs it with its identity key, together with
-   B's identity key and the group ID, so it cannot be moved to another pair or group.
-2. B sees "<A> from <group> wants to add you as a friend" and accepts or ignores it.
-   Accepting sends a signed **accept** (request ID, B's display name) as a piece back to
-   A. B saves A as a "finishing" contact with that secret and week.
+   pair secret, the starting week, a **created** time (A's working time, local storage
+   §8) and an **expires** time exactly 7 days later. A signs the format version, request
+   ID, both identity keys, display name, starting week, created, expires and SHA-256 of
+   `"Yap friend secret v1\0"` followed by the pair secret, so it cannot be moved to
+   another pair or changed. It does not sign a group: the request belongs to the pair,
+   and a group is only the route it travels by (fifth review finding 6). B accepts it
+   only through a group that, in B's own copy of the log, has both A and B as current
+   members; otherwise it is ignored.
+2. B sees "<A> from <group> wants to add you as a friend" (the group it first arrived
+   through) and accepts or ignores it. Accepting sends a signed **accept** (format
+   version, request ID, both identity keys, B's display name and the request's expires
+   time) as a piece back to A, through any group they both still share. B saves A as a
+   "finishing" contact with that secret and week.
 3. When A receives the accept, it saves B the same way. The two then set up their own
    one-to-one contact session from each other's bundles in the group log (the smaller
    identity key initiates), with bootstrap messages travelling as group pieces. When
    bootstrap finishes, both are Ready and use rotating labels like any contact.
-4. **Lost messages:** A resends the same request (same ID, same secret) until it gets an
-   accept or the deadline passes; B answers a repeated request with the same cached
-   accept.
+4. **Lost messages:** A resends the same request (same signed bytes) at most once every
+   6 hours until it gets an accept or the request expires; B answers a repeated request
+   with the same cached accept. **Bootstrap retries** follow the same route and pace,
+   not §3's ten-minute window: the initiator keeps its exact kind 03 bytes and resends
+   them until it receives kind 04; the responder answers a repeated kind 03 with its
+   exact cached kind 04. Both stop at Ready or at expiry, whichever comes first.
 
 **One request per pair.** Friend requests belong to the two identities, not to a group:
 - **Crossed requests.** If A has asked B and B has asked A, both have agreed, so the
@@ -209,8 +253,11 @@ without meeting, through the group's own encrypted connection between them.
   the only ones used. The other phone drops its own request, accepts the winner's
   without asking again, and a late accept for the losing request is ignored. So both
   phones always install the same secret.
-- **Several shared groups.** A request through a second group for the same pair is the
-  same request: it is answered with the cached accept, never a second secret.
+- **Several shared groups.** The same signed request arriving through a second group is
+  the same request: it is answered with the cached accept, never a second secret. A
+  different request ID for a pair that already has a live request follows the crossed
+  rule above if it is from the other phone, and is ignored if it is from the same
+  phone.
 - **Already friends:** a request between existing contacts is ignored.
 
 **The friend request's own finish line:**
@@ -223,14 +270,24 @@ without meeting, through the group's own encrypted connection between them.
 | Bootstrap | Contact session being set up through group pieces |
 | Ready | Bootstrap finished on that phone, as in §3 |
 
-- **Deadline:** 7 days from the request. A phone not Ready by then deletes the
-  "finishing" contact and the request, and shows "Friend request didn't finish". An
-  accept or bootstrap message that arrives after the deadline is ignored.
-- **Leaving the group before Ready** cancels it the same way, since its bootstrap
-  travels as group pieces. After Ready, leaving changes nothing.
-- **Replays:** request IDs are remembered for 30 days after they finish or are
-  cancelled, and a repeated old request is ignored, including after the friend was
-  deleted. To become friends again, one of them sends a new request.
+- **Deadline:** the signed expires time, the same on both phones. B refuses a request
+  that has already expired by its own working time, or whose created time is more than
+  2 days ahead of it (the clock rule's threshold). A phone not Ready by expiry deletes
+  the "finishing" contact and the request, and shows "Friend request didn't finish".
+  An accept or bootstrap message that arrives after expiry is ignored.
+- **Leaving the group before Ready** cancels it the same way only if the two phones no
+  longer share any group, since bootstrap travels as group pieces; otherwise it carries
+  on through another shared group. After Ready, leaving changes nothing.
+- **Replays:** request IDs, with their cached accepts, are remembered until 30 days
+  after the request expires. After that, a replayed request is refused anyway because
+  it has expired, and working time never goes back (local storage §8), so an old
+  request is never accepted again, including after the friend was deleted. The one
+  exception is the open limit of a restored older copy of the whole store. To become
+  friends again, one of them sends a new request.
+- Tests: crossed requests sent through different groups; the same request through two
+  groups; leaving one of two shared groups before Ready, and the only one; a request
+  first delivered 6 days after it was made; kind 04 lost, then a restart; a replay
+  after the remembered ID has been dropped; a request whose created time is far ahead.
 - **Space:** accepting needs a free contact place (128); if there is none, the app says
   "Contacts full" and the request stays waiting. A phone keeps at most 5 outgoing and
   20 incoming requests across all groups; further incoming ones are dropped. It sends
@@ -269,7 +326,8 @@ proposal still holds: joining a group does not make anyone contacts by itself).
 4. The finish-line rules (§3), especially the one-side-Ready case.
 5. Adding friends through a group (§5).
 6. The value used to find the pairing link: it should be scoped to the attempt,
-   erased on completion or cancellation, and never fall back to a permanent token.
+   erased at the resume deadline or on cancellation (not on completion, since a phone
+   may still need to resume until then), and never fall back to a permanent token.
 
 ## Test plan
 
@@ -282,8 +340,10 @@ proposal still holds: joining a group does not make anyone contacts by itself).
   second pair secret are all refused.
 - A link closing at each step before Confirmed cancels the attempt and leaves nothing
   behind; after Confirmed, a new link within ten minutes resumes and finishes; past the
-  deadline both phones show "Pairing didn't finish"; a cancelled attempt never sends a
-  packet later; a restart before Ready cancels.
+  deadline a phone that is not Ready shows "Pairing didn't finish", while a Ready phone
+  keeps its contact (the one-side-Ready case below); a cancelled attempt never sends a
+  packet later; a restart before Confirmed cancels, and after Confirmed the attempt
+  resumes from its saved state.
 - Responder Ready while the initiator cancelled: the responder shows "Finishing
   pairing", then the re-pair prompt after 24 hours.
 - Friend through a group: request, accept, lost accept (repeated request gets the
