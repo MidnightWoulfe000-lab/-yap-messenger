@@ -54,42 +54,49 @@ test build, but it cannot carry real use:
 
 ### 1. One database, owned by the Rust endpoint
 
-A single [redb](https://github.com/cberner/redb) database, `messaging/yap-store-v1.redb`
-in `noBackupFilesDir`. redb is already pinned in `core/` (version 2.6.0) for the carrier
-store. It is pure Rust, gives all-or-nothing write transactions that survive power loss,
-and lets readers see a consistent state while a write is in progress.
+A single **SQLCipher** database, `messaging/yap-store-v1.db` in `noBackupFilesDir`,
+opened by the Rust endpoint through `rusqlite` with its bundled SQLCipher build (both
+pinned, as libsignal is). Decided (owner, 28 November 2026): SQLCipher encrypts every
+database page, so a seized file shows only one encrypted file of a certain size, not
+how many messages each chat has. An earlier draft used redb with per-record encryption,
+which left per-chat counts and sizes visible.
+
+SQLite gives all-or-nothing transactions that survive power loss (write-ahead log,
+`synchronous = FULL`), and lets screens read a consistent state while a write is in
+progress.
 
 The Rust endpoint opens the database itself. Snapshots no longer cross the native
 bridge: Android sends a small request ("send this text to this contact", "here is an
 envelope") and gets a small result back. One serial worker still does all writes, as
 today; screens read history through read-only transactions, page by page.
 
-*For review:* SQLite (with or without SQLCipher) is the usual alternative. redb is
-proposed because it is already in the project, needs no C library, and the encryption
-below does not depend on the database encrypting itself.
-
 ### 2. Encryption at rest
 
-- **Store key.** On first start the endpoint makes a random 32-byte store key. Android
-  wraps it with AES-256-GCM under a new non-exportable Android Keystore key (alias
-  `org.yapmessenger.store-v1`) and saves the wrapped key in `messaging/store-key-v1.bin`,
-  written atomically. Each start unwraps it and hands it to the endpoint once. A missing
-  or unreadable wrapped key with an existing database fails closed, as today.
-- **Record values.** Every value is encrypted with XChaCha20-Poly1305 (the RustCrypto
-  `chacha20poly1305` crate already proposed for the outer layer), a random 24-byte
-  nonce, and a key made by HKDF-SHA256 from the store key with the salt
-  `Yap store v1` and the table's name as info. The associated data is the table name,
-  the record's on-disk key and the schema version, so a value cannot be moved to another
-  record or table without failing.
-- **Record keys.** Lookup keys that would reveal something (contact IDs, message IDs,
-  group IDs) are replaced on disk by HMAC-SHA256 under a separate key from the store key
-  (salt `Yap store index v1`), cut to 16 bytes. Where order matters (history), the key
-  is that opaque value followed by a sequence number.
-- **What someone with the files but not the key learns:** roughly how many records each
-  unnamed contact or group has, their sizes, and when the file changed. Not who, not
-  what.
-- **Whole-store erase.** Deleting the Keystore key and the wrapped store key makes every
-  record unreadable at once, apart from flash remnants of records written before.
+- **Store key.** The endpoint makes a random 32-byte store key, used as SQLCipher's raw
+  key (no passphrase stretching is needed for a random key). Android wraps it with
+  AES-256-GCM under a non-exportable Android Keystore key (alias
+  `org.yapmessenger.store-v1`) and saves the wrapped key in
+  `messaging/store-key-v1.bin`. Each start unwraps it and hands it to the endpoint once.
+- **First start, in this order:** create the Keystore key; make and wrap the store key;
+  write the wrapped key to a temporary file, sync it and rename it into place; only then
+  create the database. Recovery at start:
+  - wrapped key and database both present: open normally;
+  - wrapped key present, no database: an interrupted first start; delete the wrapped
+    key and alias and start again;
+  - database present, wrapped key or Keystore key missing or unreadable: **fail
+    closed**, never create a new identity over it, and tell the user the store cannot
+    be opened;
+  - neither: first start.
+- **SQLCipher settings** (page size, KDF iterations set for a raw key, HMAC algorithm)
+  are fixed in the code and recorded in `meta`; changing them is a schema change.
+- **What someone with the files but not the key learns:** the size of the database,
+  its write-ahead log and the attachments folder, and when they changed. Not who, not
+  what, not per-chat counts.
+- **Whole-store erase.** Deleting the Keystore key and the wrapped store key makes the
+  database unreadable, apart from flash remnants written before.
+- **Not protected:** a phone that is unlocked and running, with the store open; and
+  **rollback**, where someone replaces the whole database with an older copy. Encrypted
+  pages stop changes, not a complete older file. That stays open (see "Open questions").
 
 ### 3. What is stored
 
@@ -99,20 +106,38 @@ below does not depend on the database encrypting itself.
 | `prekeys` | One-time, signed and post-quantum prekeys | snapshot |
 | `contacts` | Per contact: identity, name, sender hint, pair-secret week state, recognition switch | snapshot |
 | `sessions` | One libsignal session per contact, at most 512 KiB each | snapshot |
-| `pairing` | Pairing attempts and their keys | snapshot |
+| `pairing` | Pairing attempts from Confirmed until their resume window ends: reserved pre-keys, `psk`, handshake hash, roles, commitment and cached bootstrap bytes; earlier states are memory only and a restart cancels them (encrypted pairing §3) | snapshot |
+| `friend_requests` | Friend requests sent and received through groups, with their cached accepts (encrypted pairing §5) | new |
 | `history` | Per contact or group, in order: messages, status, route, attachment references | snapshot, 512 limit |
 | `outbox` | Unsent envelopes with copy counts and reservations (mesh v3.1 §1.4) | snapshot, 448/64 limits, host memory |
 | `received` | Received-message records until each message's expiry, with the cached receipt | snapshot, 4,096 limit |
+| `seen_last_copies` | Relay keys of last copies dropped, for 24 hours (mesh v3.1 §1.3) | new |
 | `group_log` | Each group's signed events, with the results already worked out at insertion | memory only |
 | `group_state` | The group's state at its current heads | recomputed each time |
-| `group_keys` | Sender keys, label keys, hand-over state | proposed in group encryption |
+| `group_sessions` | One-to-one libsignal sessions with group members who are not contacts, by group and member | new |
+| `group_prekeys` | This phone's group bundles, replaced monthly, and the record of base keys used with each last-resort pre-key (group encryption §3.2) | new |
+| `group_keys` | Own and received sending keys and label keys by generation, at most 8 per member (§3.6) | new |
+| `group_inboxes` | Own fallback and current inbox keys per group, and every member's known inbox keys with their generation (§3.11) | new |
+| `group_pending` | Pieces waiting for acknowledgement, and the newest pending generation per sender (§3.6) | new |
+| `group_accepted` | Accepted-piece records: sender, digest of the inner message, generation and the acknowledgement sent (§3.6, "Repeated pieces") | new |
+| `attachments` | Manifests, file keys, reservations and received byte ranges (attachments §1, §4) | new |
 | `profile` | Your name, colour, onboarding flag, Enhanced security switches | plain preferences |
-| `meta` | Schema version, highest time seen (clock check) | snapshot |
+| `meta` | Schema version, SQLCipher settings, working time (§8), the space accounting in §5 | snapshot |
 
-The carrier store for other people's envelopes stays a separate database with its own
-limits (10,000 envelopes, 64 MiB), but its records get the same encryption and opaque
-keys, so a seized phone does not show which envelopes it carried. *For review:* the CPU
-cost of that on a busy carrier.
+Memory only, never written: link states, the address-label and piece-label lookup
+tables, and the recognition key table (mesh v3.1 §3.3).
+
+**The carrier store** for other people's envelopes moves from today's plain
+`relay-v1.redb` into a **second SQLCipher database**, `messaging/carrier-v1.db`, under
+its own random key, so a seized phone does not show which envelopes it carried. Its key
+lifecycle is its own: Keystore alias `org.yapmessenger.carrier-v1`, wrapped key in
+`messaging/carrier-key-v1.bin`, created in the same order as §2. Unlike the endpoint
+store, it holds only other people's envelopes, so if its key is missing or unreadable,
+the carrier database is deleted and a new empty one created, without stopping the app
+(carried envelopes are lost, which v2 already allows on eviction). It keeps its own limits (10,000 envelopes, 64 MiB) and uses the
+same working time (§8). Its acceptance-time and expiry indexes live inside the
+encrypted pages, so scans do not need to decrypt each envelope. *For review:* the CPU
+and write cost on a busy carrier, to be measured.
 
 ### 4. Saving: all or nothing
 
@@ -130,72 +155,172 @@ failed operation never half-advances a session. A crash before the commit leaves
 store as it was; after the commit, the work is done and any resend is an exact repeat
 that the received records already handle.
 
+Attachment files live outside the database (§7a), so they follow a separate,
+stated order instead of sharing the transaction.
+
 ### 5. Limits without hard stops
 
-- **History, outbox and received records** have no count limits. Outbox and received
-  records expire with their envelopes (24 hours), so they cannot grow without end.
-- **Space.** Yap keeps its store under a size the user can see and change in Settings
-  (starting value 2 GB for messages; attachments have their own,
-  [attachments proposal](attachments-v1.md)), and never fills the phone past its last
-  1 GB of free space.
-- **Fair share.** When the store is near its limit, a contact or group already using
-  more than its share (the limit divided by the number of chats with recent messages,
-  but at least 10%) has new incoming messages refused, with a notice naming it. Every
-  other chat keeps working. This answers audit finding 5: one contact can no longer
-  block the rest.
-- **Rate.** At most 1,000 incoming messages an hour are accepted from one contact or
-  one group sender. Over that, envelopes are not acknowledged, so honest senders retry.
-- 2 GB, 1 GB, 10% and 1,000 an hour are starting values.
+The review pointed out that "it expires in 24 hours" bounds age, not bytes or work, and
+that disk exhaustion is not a fix for audit finding 5. So the limits are **bytes,
+counted before writing**, with room kept back for what must never be refused.
+
+- **Space accounting.** `meta` keeps a running byte count per chat (history and its
+  attachments), per group (log, keys, sessions, pending pieces), and for the shared
+  tables (outbox, received, seen last copies). Each write adds its size to the right
+  count in the same transaction. The real file sizes (database, write-ahead log,
+  attachments, staging files) are checked against these counts at every start.
+- **Overall limits** the user can see and change in Settings: **2 GB** for messages
+  and group data, **5 GB** for attachments (attachments §4). Raising either checks the
+  phone's real free space first.
+- **The physical floor,** checked before every write transaction and every attachment
+  chunk, not only at start: Yap writes only while the phone has at least **1 GB** free
+  plus **256 MB** of headroom for its own database work. Counted record sizes are not
+  file sizes, so this check reads the real free space.
+  - Both databases use `auto_vacuum = INCREMENTAL`, so freed pages are returned a few
+    at a time and compaction never needs a second copy of the database.
+  - The write-ahead log is checkpointed after any commit that leaves it over 16 MB.
+    Read transactions for screens are short (one page of history each), so they never
+    hold the log open for long.
+  - **Below the floor**, in this order: stop accepting carried envelopes; then stop
+    accepting new incoming messages and attachments (not acknowledged, so senders
+    keep them); keep allowing receipts, deletions and the reserve's essentials; show
+    "Phone storage almost full". Another app filling the phone has the same effect.
+- **Kept back for essentials: 64 MB**, used only for receipts, acknowledgements,
+  group key changes, governance events, pairing and the space accounting itself.
+  Whether something is an essential is known only after it is decrypted and
+  authenticated, so an envelope first passes the ordinary per-sender rate below; once
+  authenticated as an essential, it may use the reserve. Essentials have their own
+  limit of 1,000 an hour per contact or group sender, so the reserve cannot become an
+  unlimited path. Operations that only shrink the store (receipts that clear the
+  outbox, deletions) are always allowed, within the physical floor's headroom.
+- **Each chat's share** at all times, not only near the limit: a chat (contact or
+  group) may use at most the larger of **10%** of the limit and an equal share among
+  chats active in the last 30 days. A chat at its share has new incoming messages
+  refused (not acknowledged, so the sender keeps them), with a notice naming it and
+  offering to clear history or raise the limit. Other chats are unaffected until the
+  whole limit is reached; then every chat over its equal share is refused first.
+- **Rates:** at most 1,000 incoming messages an hour from one contact or one group
+  sender, at most 3,000 an hour in total, and at most 1,000 an hour created by this
+  phone. Over these, envelopes are not acknowledged, so honest senders retry.
+- **Bounded tables:** outbox and received rows are bytes in the shared count and
+  expire with their envelopes; seen last copies are 48 bytes each and expire after 24
+  hours (at most 200,000, about 10 MB); pending group pieces keep only the newest per
+  sender and recipient.
+- 2 GB, 5 GB, 1 GB, 64 MB, 10%, 30 days and the rates are starting values.
 
 ### 6. Group state
 
 `group_log` keeps every event with the results `groups/` already works out when an
 event is inserted (whether it is valid, its depth, the active count before it, whether
-a SuperAdmin made it). `group_state` keeps the state at the current heads. A new event
-whose parents are the current heads updates that state from it; only an event that
-joins two branches makes the code work the state out again from the log. *For review:*
-whether `groups/` can apply events one at a time for that common case; the target is
-under 100 ms for a 10,000-event group on a mid-range phone, to be measured.
+a SuperAdmin made it). `group_state` keeps the state at the current heads.
+
+- **Full working-out stays the reference.** The existing `derive()` from the log is
+  always correct and always available.
+- **One shortcut, only when it is provably the same:** if a new event's parents are
+  exactly **all** the current heads, it extends the whole history in a straight line
+  and cannot create a new concurrent branch, so the stored state is updated from that
+  event alone.
+- **Everything else is worked out in full:** an event whose parents are not all the
+  current heads, including a late event that starts a branch from an older point (a
+  SuperAdmin decision made alongside an admin's, say, which can overrule it), a merge,
+  or any invalid event.
+- `groups/` has no public "apply one event" step yet; adding one is part of this work.
+  Before the shortcut is used, a test compares it with full working-out on every case
+  (forks, late arrivals, merges, invalid events, removals, settings, elections). Only
+  then is it timed: the target is under 100 ms for a straight-line event in a
+  10,000-event group on a mid-range phone.
 
 ### 7. Deleting
 
 - **Clear history** deletes that chat's history rows and its attachments.
-- **Removing a contact** deletes its contact record, session, pair secrets, history,
-  outbox entries and attachments in one transaction.
-- **Leaving a group** deletes its log, state, keys, history and attachments.
-- After large deletions the database is compacted so freed pages are reused.
-- Deleted records may survive on flash; the docs say so and do not promise otherwise.
+- **Removing a contact** deletes its contact record, session, pair secrets, history
+  and outbox entries in one transaction, and marks its attachment files for deletion
+  (§7a).
+- **Leaving a group** deletes its log, state, sessions, pre-keys, keys, inboxes,
+  pending pieces, history and attachments the same way.
+- After large deletions the database is compacted (`VACUUM`) so freed pages are reused;
+  space for that is kept free (§5).
+- Deleted records may survive on flash, and SQLCipher pages written before a deletion
+  stay readable to anyone who has both an old copy and the store key; compaction is not
+  secure erasure. The docs say so and do not promise otherwise. Signed group logs keep
+  fallback inbox keys for as long as the log is kept (group encryption §3.11).
+
+### 7a. Attachment files and the database
+
+Files cannot be in a database transaction, so the order is fixed:
+- **Adding:** write the file under a temporary name, sync it, rename it to its final
+  random name, sync the folder, and only then commit the database reference. A crash
+  before the commit leaves an orphan file, deleted at the next start.
+- **Deleting:** commit the database change first, marking the file "to delete"; then
+  delete the file; then remove the mark. At every start, marked files are deleted and
+  marks cleared.
+- **At every start:** files with no reference are deleted; references whose file is
+  missing are shown as "Attachment missing". Nothing is sent or shown until this check
+  has run.
 
 ### 8. The clock check
 
-The highest time the phone has seen is saved in `meta` with every commit, as today's
-snapshot does. Decided (owner, 27 November 2026), replacing today's refusal to open:
+Decided (owner, 28 November 2026), replacing today's refusal to open, and replacing an
+earlier draft that let two friends' messages move the clock forward (the review found
+that a phone with a wrong clock cannot reliably receive those messages, and that two
+contacts could lie together).
 
-1. **Never backwards.** The app's working time is the later of the phone's clock and
-   the highest time seen. If the clock has gone back, the app keeps working on that
-   time and shows a warning to fix the clock. Keys, labels and expiry never go
-   backwards.
-2. **Forward only on evidence from friends.** If authenticated messages from at least
-   **2 different paired contacts** were created more than 5 minutes after the working
-   time, the working time moves forward to the earlier of those two creation times.
-   Strangers cannot fake these times: they are inside messages only those contacts
-   can make.
-3. **Strangers only cause a warning.** If most of at least 5 links in 10 minutes report
-   a time far from the working time, the app shows "Your clock looks about N hours
-   wrong". It never changes the working time because strangers say so. *For review:*
-   how links report time without making a wrong clock a tracking signal (for example,
-   only when asked, rounded to the minute).
+One **working time** is used by everything: the endpoint, the carrier store, pairing,
+groups, labels, weekly secrets and attachments.
 
-Moving forward too far is the dangerous direction: it would expire messages and step
-weekly pair secrets forward, deleting the old ones (rotating address labels §1). Rule 2
-needs two contacts to agree, and never moves past what they sent.
+1. **It never goes backwards, and it keeps ticking.** Each time the working time is
+   read, it is worked out in this order, from the **last working time returned** (not
+   the value at start) and the phone's elapsed-time stopwatch
+   (`SystemClock.elapsedRealtime`):
+   1. `base` = last working time + stopwatch time since then;
+   2. if the phone's clock is at or behind `base`, the working time is `base`;
+   3. if the clock is ahead of `base` by up to 2 days, the working time is the clock;
+   4. if it is ahead by more, the working time is `base` and the question in rule 2 is
+      shown;
+   5. the result is remembered as the last working time, and saved in `meta` with the
+      next commit.
+
+   So once time has moved forward, setting the clock back, with or without a restart,
+   never brings it back. The app shows "Your phone's clock has gone back; Yap is using
+   the time it last knew". After a reboot the stopwatch restarts, so the saved value is
+   the floor and the clock is compared with it as above.
+2. **Big forward jumps wait for you.** "Your phone's clock jumped forward by N days. Is
+   that right?" Until you answer, Yap keeps ticking from `base`. **Yes** makes the clock
+   the working time from then on, and only then do expiring messages, stepping weekly
+   secrets and deleting old ones, and expiring group keys catch up. **No** keeps Yap's
+   own time and asks you to fix the clock; the question comes back if the clock is
+   still far ahead after an hour. Jumps up to 2 days, such as a phone that was off over
+   a weekend, are taken without asking; even those can expire a day's undelivered mail,
+   which is the same as if the time had really passed.
+   **A "Yes" given by mistake cannot be undone,** because working time never goes back:
+   messages that expired stay expired and deleted secrets stay deleted. The prompt says
+   so. The only way back is to re-pair the affected contacts.
+3. **Nearby phones can only cause a note.** Links do not send their clock by default.
+   A phone whose working time and clock disagree by more than an hour may ask up to 5
+   links for their time, rounded to the minute, at most once an hour. If most answers
+   disagree with it, the app shows "Nearby phones' clocks disagree with yours". This
+   never changes the working time, never allows deleting anything, and never locks
+   the app. Five links can be one person with five phones, so the note says only
+   that they disagree.
+4. **Both stores share one time.** The carrier store does not keep its own clock. At
+   start, the working time is the later of the two stores' saved values, and both
+   save the same working time from then on. If the phone stops between the two
+   commits, the later value wins at the next start.
+
+**Tests:** an advance of under 2 days followed by setting the clock back in the same
+run; a confirmed and a refused larger jump; a reboot; a crash between the two stores'
+commits.
+
+*Still open for review:* a restored older copy of the whole store can bring back an
+older working time and older secrets (rollback); this rule does not solve that.
 
 ### 9. Upgrade
 
 Nothing is migrated. On first start of the update the app deletes
 `messaging/endpoint-v1.bin`, its AtomicFile backup and new files, the Keystore alias
-`org.yapmessenger.endpoint-v1` and the `yap_profile` preferences, then creates the new
-store. Onboarding runs again and every contact is re-paired.
+`org.yapmessenger.endpoint-v1`, the `yap_profile` preferences and the old carrier store
+`messaging/relay-v1.redb`, then creates the new stores. Onboarding runs again and every
+contact is re-paired.
 
 ## What changes elsewhere
 
@@ -206,18 +331,25 @@ store. Onboarding runs again and every contact is re-paired.
 - **`SecureModel.kt`, `NativeBridge.kt`, `native/android`:** small requests and results;
   history read page by page.
 - **`Profile.kt`:** `ProfileStore` reads and writes through the endpoint.
-- **`groups/`:** persistence through `group_log` and `group_state`.
-- **Audit findings 5 and 7** are closed by this design once built and tested.
+- **`groups/`:** persistence through the group tables, and a one-event step for §6.
+- **`core/src/relay.rs`, `native/android`:** the carrier store moves to SQLCipher;
+  `peek_stored()` and the fixed offsets change with it.
+- **Audit finding 7** (whole-snapshot cost) is addressed by this design once built.
+  **Audit finding 5** (one contact blocking the rest) is addressed by the byte shares
+  and reserve in §5, once built and tested under flooding.
 
 ## Open questions for the reviewer
 
-1. redb with per-record XChaCha20-Poly1305 and HMAC keys, or SQLite with SQLCipher?
-2. Is the metadata left visible on disk (record counts and sizes per unnamed chat)
-   acceptable?
-3. Encrypting the carrier store: worth the CPU?
-4. The starting values in §5.
-5. Applying group events one at a time (§6).
-6. The clock rule (§8), especially how links report time in rule 3.
+1. SQLCipher through `rusqlite`: versions, Android build, and the settings for a raw
+   key.
+2. Moving the carrier store to SQLCipher: CPU and write cost (§3).
+3. The byte accounting, reserve and shares in §5, and their starting values.
+4. The group-state shortcut and its equivalence test (§6).
+5. The file order in §7a.
+6. The clock rule (§8).
+7. **Rollback:** a restored older copy of the whole database brings back older state.
+   Not solved here; options include a counter in the Keystore, which needs its own
+   review.
 
 ## Test plan
 
@@ -229,20 +361,25 @@ store. Onboarding runs again and every contact is re-paired.
   and scrolling history each take the same time as with 100 messages (measured on a
   mid-range phone).
 - One contact sending without stopping: other chats keep working; that contact is
-  refused at its fair share and named in the notice.
-- Removing a contact leaves no record readable for it; clearing history removes its
-  rows and attachments.
-- A value copied to another record or table fails to open; a changed value fails to
-  open.
-- A missing or wrong wrapped store key fails closed and never creates a new identity
-  over existing data.
-- Upgrade from 0.2 deletes every old file, alias and preference.
-- A 10,000-event group: inserting an event at the heads takes under 100 ms.
+  refused at its share and named in the notice; receipts and group key changes still
+  go through with the store full.
+- Every chat at its share at once: the reserve still accepts receipts, key changes and
+  governance events.
+- Removing a contact leaves no record for it; clearing history removes its rows and
+  attachments; a crash at each step of §7a leaves no orphan file and no dangling
+  reference after the next start.
+- A changed page fails to open the database.
+- Each first-start recovery case in §2 behaves as stated; a missing or wrong wrapped
+  store key never creates a new identity over existing data.
+- Upgrade from 0.2 deletes every old file, alias, preference and the old carrier store.
+- The group-state shortcut gives exactly the same state as full working-out on every
+  case in §6; then a straight-line event in a 10,000-event group takes under 100 ms.
 
 ## Implementation steps (after approval)
 
-1. Endpoint (Rust): the store, encryption, tables, transactions, libsignal adapters.
-2. Endpoint: limits and fair shares; group log and state.
+1. Endpoint (Rust): the SQLCipher store, key handling, tables, transactions,
+   libsignal adapters; the carrier store moved to SQLCipher.
+2. Endpoint: byte accounting, reserve and shares; group tables and state.
 3. Android: store key wrapping, the new bridge calls, paged history, profile moved.
 4. Upgrade clean-up, then the tests above.
 5. Docs: endpoint contract, `SECURITY.md`, audit findings 5 and 7.

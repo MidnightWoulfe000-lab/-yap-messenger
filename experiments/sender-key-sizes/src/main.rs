@@ -8,9 +8,12 @@ use std::time::SystemTime;
 
 /// Bytes a piece adds around its libsignal message: piece label (16), the
 /// hour it was wrapped in (8), the outer layer `YGO1` tag, nonce and AEAD tag
-/// (4 + 24 + 16), and its length prefix in a batch (2). The outer layer adds
-/// exactly these bytes by construction, so it is counted rather than run.
-const PIECE_OVERHEAD: usize = 16 + 8 + 4 + 24 + 16 + 2;
+/// (4 + 24 + 16), and its four-byte length prefix in a `YGB1` batch (4): 72
+/// bytes. The outer layer adds exactly these bytes by construction, so it is
+/// counted rather than run. A batch also starts with a five-byte `YGB1`
+/// prefix, once per batch, which is not part of the per-piece figure.
+const PIECE_OVERHEAD: usize = 16 + 8 + 4 + 24 + 16 + 4;
+const BATCH_PREFIX: usize = 5;
 
 /// A `YGH1` hand-over plaintext as the proposal lays it out, naming
 /// `events` governance events.
@@ -27,6 +30,7 @@ fn hand_over(events: usize, distribution: &[u8]) -> Vec<u8> {
     }
     b.extend_from_slice(&[4; 16]); // distribution ID
     b.extend_from_slice(&[5; 32]); // label key
+    b.extend_from_slice(&[6; 32]); // new inbox key (proposal 3.11)
     b.extend_from_slice(&(distribution.len() as u16).to_be_bytes());
     b.extend_from_slice(distribution);
     b
@@ -141,7 +145,7 @@ async fn run() -> Result<(), SignalProtocolError> {
     let skdm =
         create_sender_key_distribution_message(&addr("x"), dist, &mut keys, &mut rng).await?;
     println!("distribution message: {} bytes", skdm.serialized().len());
-    println!("piece overhead outside the libsignal message: {PIECE_OVERHEAD} bytes");
+    println!("piece overhead outside the libsignal message: {PIECE_OVERHEAD} bytes (plus {BATCH_PREFIX} per batch)");
 
     for events in [0usize, 1, 16] {
         let body = hand_over(events, skdm.serialized());

@@ -48,26 +48,33 @@ address is ignored. A "Coming soon" screen alone does not turn it off.
   and own-device revocation events in `groups/` are removed, with their tests
   ([GROUP_MECHANICS](../GROUP_MECHANICS.md) §5).
 - **A private signing key.** Today every build is signed with the public
-  `android/app/debug.keystore`, so anyone can make an app Android treats as Yap, and
-  moving to another key later would force everyone to uninstall and lose their data.
-  This update moves to a private key: the owner creates it, keeps an offline backup,
+  `android/app/debug.keystore`, so anyone can make an app Android treats as Yap.
+  Android does support signing-key rotation (APK Signature Scheme v3), but this update
+  moves to a fresh private key instead of a rotation lineage, because everyone
+  reinstalls anyway and a clean start is simpler. This update moves to a private key: the owner creates it, keeps an offline backup,
   and stores it as a GitHub Actions secret that CI writes out only while building. The
   public keystore is deleted from the repository. The debug updater keeps checking
-  that an update carries the same key. Because everyone reinstalls for this update
+  that an update carries the same key. Note that `DebugUpdater.checkSignature()` skips
+  its pre-check on Android 8.0 and 8.1 (API 26 and 27); Android's installer still
+  enforces the signature there. Because everyone reinstalls for this update
   anyway, no one loses data twice. Losing the private key would mean no further
   updates, so the backup is not optional.
 - **The old unencrypted Bluetooth chat is removed** (`YapBluetooth.kt` and its use in
   `MainActivity.kt`, its screens and tests). All messaging goes through the encrypted
   endpoint. `AGENTS.md` and `SECURITY.md` are updated to match.
 - **Nearby messaging survives reboots and battery savers.** A `BOOT_COMPLETED`
-  receiver restarts `MeshService` after the phone restarts, if nearby messaging was on
-  (to confirm on Android 12 to 15, which limit what may start from boot). The first
+  receiver restarts `MeshService` after the phone restarts, only if the user's saved
+  nearby setting is on, after storage is ready and the permissions allow it, and with
+  the existing foreground notification and a reliable way to stop it (to confirm on
+  Android 12 to 15, which limit what may start from boot). The first
   time nearby messaging is switched on, the app asks once to be left out of battery
   optimisation (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`), explaining why. If the service
   is still being killed, Settings shows a short guide for that phone maker.
-- **The clock rule:** a clock that goes backwards no longer locks the app. Time never
-  goes back, moves forward only when two friends' messages show it is behind, and
-  strangers can only trigger a warning ([local storage](local-storage-v1.md) §8).
+- **The clock rule:** a clock that goes backwards no longer locks the app. Yap's
+  working time never goes back and keeps ticking on the phone's stopwatch; a forward
+  jump of more than 2 days waits for the user to confirm before anything is expired or
+  deleted; nearby phones can only cause a "clocks disagree" note
+  ([local storage](local-storage-v1.md) §8).
 
 | Part | What it adds | Main files |
 | --- | --- | --- |
@@ -108,10 +115,14 @@ connection per minute and 1 MiB per minute in total (`native/android/src/lib.rs`
 
 | Event, group of 128 | Envelopes | Size | Share of one phone's carrier store |
 | --- | --- | --- | --- |
-| A removal, every session open | 127 | about 6.7 MB | about 10% of the space |
-| A removal, no sessions open yet (worst case) | about 635 | about 33 MB | about half of the space |
+| Removal, every session open, 1 event | 127 | about 7.3 MB | about 10% of the space |
+| Removal, every session open, 16 events | about 381 | about 14.9 MB | about a fifth |
+| Removal, new sessions, 1 event | about 635 | about 34 MB | about half |
+| Removal, new sessions, 16 events | about 762 | about 41 MB | about two thirds |
 
-At 1 MiB a minute, taking in the worst case takes a carrier over half an hour.
+These are the largest cases measured (group encryption §3.9), not proven maximums;
+limits are enforced from actual encoded bytes. At 1 MiB a minute, taking in the last
+row takes a carrier over half an hour.
 
 ### 1.1 The envelope header
 
@@ -135,11 +146,14 @@ Two new bytes go into the authenticated part of the header:
 | 62 | 8 | expiry time (ms, big-endian) |
 
 The hop byte stays outside the binding, straight after it (encoded byte 70), and the
-relay key still zeroes it before hashing. Because both new bytes are in the binding,
+relay key still zeroes it before hashing. The four-byte ciphertext length stays as it
+is today, so it takes bytes 71 to 74 and the new envelope header is **75 bytes**
+(73 today). The Rust decoder, `core::relay::peek_stored()` and the Kotlin offsets all
+move with it. Because both new bytes are in the binding,
 they are covered by the relay key, by the effort stamp and by the outer wrapper's
 associated data (rotating address labels §5, group encryption §3.4, both updated to 70
 bytes). Changing either one gives a different relay key and breaks the stamp. The Rust
-decoder, the Kotlin code that reads hops, destination and ID at fixed offsets
+decoder, `core::relay::peek_stored()`, the Kotlin code that reads hops, destination and ID at fixed offsets
 (`SecureModel.kt` `envelopeKey()` and `receive()`), the size checks and the outer-layer
 test vectors all change together. A phone checks the class and starting copies before
 doing anything that depends on them: a class other than 1 or 2, or starting copies of
@@ -184,9 +198,13 @@ The same rules apply to both classes (owner, 27 November 2026):
 - **Splitting.** A holder with `n` copies, `n` of 2 or more, gives `floor(n / 2)` to a
   phone that wants it and keeps the rest. A phone refuses an allocation larger than
   the envelope's starting copies.
+- **No hops left.** A holder cannot tell a recipient from a stranger, so a split
+  allocation with no hops left is sent as a last copy: to any phone not yet sent a last
+  copy, the holder keeping its own allocation (nothing is debited); the recipient or
+  member keeps it, a stranger drops it.
 - **The last copy.** A holder with one copy offers it, marked as a last copy, to every
   phone it meets that has not seen the envelope, and **keeps its own copy** until it
-  expires. The phone that receives it decides privately what to do:
+  expires. The phone that receives it decides privately what to do.
   - the one-to-one recipient reads it and stores the message as its own;
   - a member of the group reads it and keeps it as a last-copy holder itself, so
     members carry group messages to each other;
@@ -196,9 +214,16 @@ The same rules apply to both classes (owner, 27 November 2026):
     those too cut delivery noticeably, because phones that had seen a last copy could
     no longer help spread the split copies.)
 
-  In every case the receiving phone sends the same `ACK` at the same point: after the
-  label lookup and the store-or-drop decision, before any decryption. The holder cannot
-  tell which of the three happened. Nobody is asked whether an envelope is theirs.
+  In every case the receiving phone sends the same `ACK` bytes at the same step: after
+  the label lookup and the store-or-drop decision, before any inner (libsignal)
+  decryption. A batch matched only through its piece directory first needs a bounded
+  outer-layer opening to decide (group encryption §3.11, which gives the full receive
+  order). So the `ACK`
+  itself does not say which of the three happened, and nobody is asked whether an
+  envelope is theirs. The `ACK` means "handled", never "stored". The time taken
+  differs between storing and dropping, and between a plain envelope and a batch (up
+  to 128 label lookups); this proposal does not claim the paths are indistinguishable
+  by timing, which needs measuring once built.
 - **The recipient behaves like everyone else.** A one-to-one recipient given a split
   allocation carries it like any carrier, so its later behaviour on links does not
   show that the message was for it.
@@ -211,10 +236,15 @@ bounded by the 24-hour lifetime, and depth by 8 hops.
 
 **The cost.** A last-copy holder sends the envelope once to every new phone it meets
 for up to 24 hours. In the corrected [copy-count simulation](../../experiments/copy-count-sim/FINDINGS.md)
-this delivered exactly as well as asking each phone whether a message was its own, but
+this delivered about as well as asking each phone whether a message was its own (within
+a few per cent in every scenario, which five seeds cannot tell apart from noise), but
 sent each message about as many times as unlimited flooding does: nearly every phone
-near a holder is sent it once. Those phones store nothing and pass nothing on, so
-storage stays bounded (about 210 envelopes on the busiest phone, against 10,000). At
+near a holder is sent it once. Those phones store nothing and pass nothing on. In the simulation's
+busiest scenario (`crowd`, 800 phones, about one message per phone per day) the busiest
+phone held 208 envelopes on average across seeds and 232 at most, against the 10,000
+limit; these count envelopes only, with no bytes and no eviction. That occupancy is a
+sample at light load, not a bound: the resource caps (10,000 envelopes, 64 MiB, the
+per-minute intake limits) bound storage, and nothing here replaces them. At
 light load every link stayed within its limits; under heavy chat load this traffic
 would fill links sooner. Real phones must confirm that it fits within the link and
 native limits. *For the reviewer:* if it does not, a holder could send a last copy to
@@ -257,7 +287,10 @@ is its own.
 - `OFFER` (11): an offer ID (8 random bytes), an entry count (1, at most 64), then per
   entry the relay key (48), the routing class (1) and what is given (1): `0` for a last
   copy, otherwise the number of copies to carry. 3,209 bytes at most.
-- `WANT` (12): the offer ID (8) and a 64-bit map of the entries wanted (8). A phone
+- `WANT` (12): the offer ID (8), a status (1: `0` answered, `1` busy) and a 64-bit map
+  of the entries wanted (8). A busy `WANT` answers nothing: every entry goes back to
+  Not offered, to be offered again later (see "Budget"). A `WANT` for an unknown offer
+  ID, or a second `WANT` for the same offer, is ignored. A phone
   declines a split allocation of an envelope it already holds a split allocation of,
   and declines a last copy (`0`) of an envelope it has been sent a last copy of in the
   last 24 hours. Otherwise it wants the entry. A phone that was sent only a last copy
@@ -266,10 +299,16 @@ is its own.
   then carries like anyone else), so the answer does not show which it was. An entry
   with a class other than 1 or 2, or a
   "given" number above that class's limit, is not wanted.
-- `ENVELOPE` (1) and `GROUP_ENVELOPE` (9): offer ID (8), entry index (1), what is given
-  (1), effort stamp (8), envelope. The class, the given number and the relay key must
+- `ENVELOPE` (4, as today; type 1 is `HELLO`) and `GROUP_ENVELOPE` (9): offer ID (8), entry
+  index (1), what is given (1), effort stamp (8), envelope. The class, the given number and the relay key must
   match the offer entry, and the given number must not exceed the envelope's starting
   copies; otherwise the frame is refused.
+  The longest frame is a full 65,536-byte envelope plus offer ID (8), index (1), given
+  (1), stamp (8) and type (1): **65,555 bytes**. Today's `MAX_FRAME` is 65,537, so it
+  rises to 65,555 in this update, and every frame decoder, size check and native bound
+  that depends on it changes together (even today's smaller prefix leaves a mismatch at
+  a full-size envelope). A test sends and receives an envelope of exactly the maximum
+  size in an `ENVELOPE` and a `GROUP_ENVELOPE` frame, and refuses one byte more.
 - `ACK`: names the offer ID and entry index. A duplicate or unknown `ACK` is ignored.
 
 **States, per link and envelope.**
@@ -277,19 +316,31 @@ is its own.
 | State | Meaning | Next |
 | --- | --- | --- |
 | Not offered | | Offered when it comes up in the page |
-| Offered | `OFFER` sent, waiting for `WANT` | `WANT` within 10 s: wanted entries go to Sending, others to Settled. No `WANT`: back to Not offered, retried after 30, 60, 120 s and so on, up to 10 minutes |
-| Sending | Copies reserved, envelope sent | `ACK` within 30 s: Settled, reservation spent. No `ACK`, or the link closes: Uncertain |
+| Offered | Copies reserved, `OFFER` sent, waiting for `WANT` | Answered `WANT` within 10 s: wanted entries go to Sending, unwanted ones to Settled and their reservations are released. Busy `WANT`, or no `WANT`: reservations released, back to Not offered, retried after 30, 60, 120 s and so on, up to 10 minutes |
+| Sending | Envelope sent | `ACK` within 30 s: Settled, reservation spent. No `ACK`, or the link closes: Uncertain |
 | Uncertain | It may or may not have arrived | The reservation counts as **spent**. Offered again later; if not wanted, Settled |
 | Settled | Never offered on this link again | |
 
-**Reserving copies.** When an entry moves to Sending, the native store moves the given
-copies from "available" to "reserved" in one write, before the frame is sent. Splits
-are worked out from what is still available, so twelve links in a row get 48, 24, 12
-and so on, never 48 each. An `ACK` turns the reservation into spent copies. Anything
-uncertain is treated as spent, never released: losing a few copies is safe, and
-releasing them could create copies that already exist elsewhere. A last copy (`0`)
-reserves nothing, since the holder keeps it. When available and reserved copies are
-both zero, the carrier deletes the envelope.
+**Reserving copies.** An allocation is fixed **when it is put in an `OFFER`**: the
+native store moves the given copies from "available" to "reserved" in one write before
+the `OFFER` is sent, and works each split out from what is still available. So twelve
+offers sent at once from 96 copies promise 48, 24, 12 and so on, never 48 each, and
+whatever the other phone answers, the data always matches what was offered.
+- Releasing a reservation is safe only while no envelope data has been sent for it:
+  on an unwanted entry, a busy `WANT`, or no `WANT`.
+- Once data is sent, an `ACK` turns the reservation into spent copies, and anything
+  uncertain is spent, never released: losing a few copies is safe, and releasing them
+  could create copies that already exist elsewhere.
+- A last copy (`0`) reserves nothing, since the holder keeps it.
+- Each link has at most one `OFFER` outstanding, so at most 12 × 64 reservations exist
+  at once. Spent reservation records are deleted once the transfer is settled.
+- When available and reserved copies are both zero, the carrier deletes the envelope.
+
+A phone that keeps wanting allocations and then dropping them can waste a holder's
+copies; uncertain transfers are spent, which does not prove anyone kept them. That is
+an accepted cost: it slows spreading but never creates extra copies. Two links can
+also deliver the same envelope to one phone at once, spending two allocations for one
+kept copy.
 
 **What is kept.** Copy counts and reservations are stored with the envelope, so they
 survive a restart, and the sender's own counts are stored with its outbox envelope
@@ -300,28 +351,50 @@ only and cleared when the link closes; a new link starts afresh.
 **Paging.** The host asks the native store for candidates page by page, in order of
 acceptance time and then relay key, so a page boundary does not move when envelopes
 are added or expire. It starts each link where that link's last page stopped and skips
-settled ones before applying the send limit. Each link's settled list keeps the first
-16 bytes of each relay key and can hold the whole store (10,000 entries, 160 KB).
+settled ones before applying the send limit. Each link's settled list keeps the **full 48-byte relay key**, not its first 16 bytes:
+those bytes are the sender-chosen message ID, so two different envelopes can share
+them, and a copied ID would settle the real envelope. A long-lived link can settle more
+envelopes than the store holds at once, as the store turns over, so each list is
+capped at **20,000** keys (about 960 KB). When full, the oldest settled key is
+forgotten. An envelope whose key was forgotten may be offered once more on that link,
+and the other phone's `WANT` then declines it if it still has it. So the rule is "not
+offered again while remembered", and the only cost of forgetting is one extra offer
+entry. The seen-last-copy table (local storage §5, at most 200,000) works the same way:
+when full, the oldest record is dropped, and the cost is that a phone may be sent a
+last copy it already dropped.
+
+If an envelope is evicted from the store while it is offered, its entries are answered
+as unavailable: no data is sent and its reservation is released.
 
 **"Already has it"** means "as far as the other phone knew when it answered". If a
 second link delivers the same envelope between `WANT` and the data, the phone `ACK`s
 the extra copy and drops it.
 
-**Budget.** A phone answers at most 600 offer entries a minute across all its links.
-Over that, it sends an empty `WANT`, and the offer is retried later. 600, 64 entries,
-and the retry times are starting values.
+**Budget.** A phone answers at most 600 offer entries a minute across all its links,
+counted over a rolling minute. Over that, it sends a busy `WANT`, which settles
+nothing, and the offer is retried later. **Fair shares:** the 600 are split equally
+between the links that sent offers in the last minute; a link that has used its share
+gets busy answers while others still have theirs, and any share left unused in the
+minute goes to whoever asks next. So no link can be starved by others, though under
+heavy load each link moves slowly. 600, 64 entries, and the retry times are starting
+values.
 
-*What a `WANT` still reveals:* which envelopes a phone has seen. Someone who gets a
-particular stamped envelope to a phone, then later offers it again under a new link ID,
-can tell whether it is the same phone. This needs a fresh stamp for each such marker
-and is limited by the budget above. It is accepted for this update and listed for
-review. The answer no longer shows whether an envelope is a phone's own.
-
-*What a group member still reveals:* a member keeps and re-offers a last copy where a
-stranger drops it. Someone who handed a phone a last copy and later sees that phone's
-new link ID offering it can tell that phone is a member of that envelope's group,
-though not which group. One option for review: a member waits until its link ID has
-changed before offering a last copy it received.
+**What is still revealed, stated plainly** (accepted for this update, listed for
+review):
+- *Which envelopes a phone has seen.* Anyone can offer the relay key of an envelope
+  they have observed, with no stamp needed, and see from the `WANT` whether a phone has
+  seen it. Someone who once delivered a particular envelope to a phone can reuse that
+  same envelope, without a new stamp, to check later whether a phone under a new link
+  ID is the same one. The budget limits how fast, not whether.
+- *Group membership, through behaviour.* A member keeps and re-offers a last copy
+  where a stranger drops it. Someone who handed a phone a last copy, and later sees it
+  offered again, can tell that phone is a member of that envelope's group, though not
+  which group. Waiting for a link-ID change before re-offering would not hide this
+  from someone watching for that envelope, and could help them link the two link IDs,
+  so it is not proposed.
+- *Timing,* as in §1.3.
+- The answer no longer shows whether an envelope is a phone's own, and no destination
+  label is ever asked about.
 
 ### 1.5 Batches stay whole
 
@@ -339,11 +412,12 @@ Because a phone now decides after receiving the whole envelope (§1.3), a newcom
 longer needs to recognise a label before the batch is sent to it. It still needs a
 way to find its piece inside a batch.
 
-**Still to write before building**, in the group encryption proposal: the batch's wire
-format, the routing fields a receiver can see before it has the current group key, a
-bounded scan of piece labels, how a newcomer or a member who has fallen behind finds
-its piece, and how piece acceptance and carrier storage are acknowledged separately.
-Group encryption §3.9 defines the pieces, not the container.
+**The container** is specified in [group encryption §3.11](group-encryption-v1.md):
+the batch's wire format, a bounded scan of up to 128 piece labels for a phone that is
+not up to date, inbox keys so a newcomer or a member who has fallen behind still finds
+its piece, and separate acknowledgements for storing the envelope and installing a
+piece. A phone that finds a piece of its own in a batch counts as a member for §1.3 and
+keeps the batch.
 
 ### 1.6 Eviction and loss
 
@@ -499,8 +573,12 @@ stops it; only a separately reviewed distance-measuring design could.
 
 So:
 - the screen says "recognised", never "here", "nearby" or "connected to Ravi";
-- recognition is never used for routing, permissions, safety decisions, temporary
-  groups or anything else. It only puts a name on a row.
+- recognition is never used for routing, permissions, safety decisions or temporary
+  groups. It puts a name on a row, and it lets two recognised friends start a direct
+  transfer of a big attachment ([attachments](attachments-v1.md) §3). That second use
+  does change traffic after a match: a recognised link may carry a direct transfer.
+  The transfer has its own encrypted channel, and recognition is never taken as
+  evidence of distance.
 
 ### 3.2 The recognition probe
 
@@ -551,29 +629,44 @@ per friend, removing a friend just deletes that key.
 
 ### 3.3 Keeping the work bounded and invisible
 
-The amount of work must not show how many contacts a phone has, since a stranger can
-time when a `PROBE` is sent and how long the phone takes afterwards.
+**The property required:** the time between receiving `HELLO` and sending the `PROBE`,
+and the time spent on a received `PROBE`, must not depend on how many contacts the phone
+has, which ones, or whether one matched. Counting HMACs is not enough; the whole
+operation has to be fixed. So:
 
-- **Making a probe** always computes 128 HMACs: one per contact and, for unused slots,
-  one with a random throwaway key. The filler slots are then replaced with random
-  bytes as in §3.2.
-- **Checking a probe** always computes 256 expected tags (128 contact places, each
-  with the current week's and the previous week's pair secret, see §3.4; unused places
-  use random throwaway keys) and compares every one with all 128 slots, using
-  constant-time comparisons with no early exit.
-- **Caps**, phone-wide, separate for making and checking: at most 30 of each a minute,
-  one at a time on the endpoint worker, with at most 4 waiting. Over a cap, a phone
-  sends a `PROBE` of filler only, or leaves the received one unchecked, and the link
-  stays anonymous. The link itself is unaffected.
-- A match changes nothing a stranger could see: no reply frame, no change in what is
-  sent or offered on the link, how long it is kept open, or what is logged.
-- 30 a minute and 4 waiting are starting values, to check on real phones. The whole
-  exchange is to be timed on real phones with 1 and with 128 contacts.
+- **A fixed key table** with two parts, both 128 places:
+  - **sending keys** (current week only): a contact's `linkKey`, or a random throwaway
+    key where there is no contact or you have hidden from that contact (§3.9);
+  - **matching keys** (previous, current and next week, §3.4): a contact's `linkKey` for
+    each week, or a throwaway key where there is no contact or no secret for that week
+    (a contact paired this week has no previous week). **Hiding does not remove
+    matching keys**, so a hidden phone still recognises friends who have not hidden.
+
+  The table is rebuilt in the background when the week turns or a contact is added,
+  removed or hidden, and swapped in whole, never during a link: a link already open
+  keeps the table it started with, and the next link (after the link-ID change that
+  hiding forces) uses the new one. Making and checking a probe
+  only read this table, so loading contacts, deriving keys and handling missing keys
+  never happen while a link is waiting.
+- **Making a probe** computes 128 HMACs from the sending keys, then replaces the filler
+  places with random bytes and shuffles, as in §3.2.
+- **Checking a probe** computes 384 expected tags (the matching keys) and compares every
+  one with all 128 slots, using constant-time comparisons with no early exit, then
+  picks the result with a fixed-time selection.
+- **Caps**, phone-wide, separate for making and checking: at most 30 of each in any
+  rolling 60 seconds, one at a time on the endpoint worker, with at most 4 waiting.
+  Over a cap, the phone sends a `PROBE` of filler taken from a pre-generated pool of
+  random bytes, or leaves the received one unchecked, and the link stays anonymous.
+  The link itself is unaffected.
+- A match changes nothing a stranger could see on that link, with one exception: two
+  recognised friends may start a direct transfer of a big attachment (§3.1).
+- 30, 4 and the table size are starting values. The complete exchange is to be timed
+  on real phones with 0, 1 and 128 contacts, with and without a match, before this is
+  relied on.
 
 *Accepted limit:* the caps are shared and nobody is authenticated before them, so a
-stranger making many links can use them up, and friends then stay anonymous for a
-while. Recognition only puts a name on a row, so this degrades the screen, not
-messaging.
+stranger making many links can use them up. Friends then stay anonymous for a while,
+and big attachment transfers between them wait. Messages are not affected.
 
 ### 3.4 The link key
 
@@ -584,10 +677,11 @@ messaging.
 linkKey = HKDF-SHA256(ikm = pairSecret_week, salt = "Yap link key v1", info = "")  -> 32 bytes
 ```
 
-The tagger uses the week of its own clock. The receiver checks both the current and
-the previous week (§3.3), so two phones either side of a week boundary still recognise
-each other. It is worked out when needed and never stored, sent, or passed out of the
-endpoint (Rust). The separate salt means the same secret is never used directly for two
+The tagger uses the current week of its own working clock. The receiver checks the
+previous, current and next week (§3.3), so whichever phone is ahead across a week
+boundary, both recognise each other. Weeks before the contact's pairing week have no
+secret and use throwaway keys. Derived keys live only in the endpoint's in-memory table
+(§3.3) and are never written to disk, sent, or passed out of the endpoint (Rust). The separate salt means the same secret is never used directly for two
 jobs. It does not protect the others if the pair secret itself leaks: whoever has the
 pair secret has every key made from it.
 
@@ -613,7 +707,8 @@ reviewed and changed together, not simply doubled:
 At the 512 KiB ceiling, 128 sessions cannot fit in one 8 MiB snapshot. Real sessions
 are usually far smaller, but the code must not depend on that. The snapshot, which is
 rewritten whole on every change, also holds every saved message. How a phone stores its
-own chats and sessions for 128 contacts needs its own proposal (see "Not covered").
+own chats and sessions for 128 contacts is the job of the SQLCipher store in
+[local storage](local-storage-v1.md).
 
 ### 3.6 Changes
 
@@ -664,8 +759,10 @@ security** lets them stop it (owner, 27 November 2026).
 How it works:
 - While hidden, the phone still sends its `PROBE`, with all 128 slots (or that friend's
   slot) filled with random bytes, after the same 128 HMACs (§3.3). To a stranger, and
-  to a friend, it looks exactly like a phone with no friends nearby, so hiding itself
-  is not visible.
+  to a friend, the probe looks exactly like one from a phone with no friends nearby.
+  One thing can hint at hiding over time: big attachments between you and that friend
+  never start, because they need recognition both ways
+  ([attachments](attachments-v1.md) §3).
 - Hiding takes effect at once: the phone changes its link ID straight away, as it already
   does every 10 to 20 minutes, which closes its links and opens new ones under the new
   rules. A friend's phone loses the name with the old link.
@@ -690,7 +787,7 @@ What it does not hide:
 ## How the parts fit together
 
 - **Frame types:** `GROUP_ENVELOPE` 9, `PROBE` 10, `OFFER` 11, `WANT` 12. `ENVELOPE`
-  (1) and `ACK` gain the offer fields in §1.4. `DELIVERED` (8) is retired and not
+  (4) and `ACK` gain the offer fields in §1.4. `DELIVERED` (8) is retired and not
   reused. Today's parser refuses 9 and above; that changes in this update.
 - **Flood and stamps:** `PROBE`, `OFFER` and `WANT` carry no envelope and need no
   stamp. `PROBE` has its own caps (§3.3). `OFFER` and `WANT` count towards the link's
@@ -707,8 +804,6 @@ What it does not hide:
   return needs its own design: it stores envelopes by a fixed mailbox, which would link
   rotating labels, it has no way to deliver to a group, and a fixed mailbox must never
   reach nearby traffic. Until then nothing in the app sends to or fetches from it.
-- **Own chat storage.** How a phone stores its own messages and sessions for 128
-  contacts (§3.5).
 - **A membership or recipient proof** for carriers (§1.3). Not planned.
 - **Tor.** Not designed.
 - **Measurement.** The copy counts, last-copy traffic, flood limits under a removal
@@ -770,8 +865,11 @@ Part 1:
 - An envelope the other phone already has is never offered to it, for both classes; a
   settled envelope is never offered again on that link; state clears on close.
 - Paging: a link sees every eligible envelope in a store holding more than 128 settled
-  ones, with envelopes added and expiring during the walk.
-- The `WANT` budget: over 600 entries a minute gets empty answers, and offers resume.
+  ones, with envelopes added and expiring during the walk. Two envelopes with equal
+  message IDs but different bytes (destination, ciphertext, class, creation time) are
+  tracked separately: settling one does not settle the other.
+- The `WANT` budget: over 600 entries a minute gets busy `WANT` answers (status 1,
+  settling nothing), and offers resume.
 - A member reads its piece of a batch and still carries the whole batch.
 - A removal burst from 127 senders through one carrier: slow mode and the native
   limits delay delivery.
@@ -802,12 +900,15 @@ Part 3:
 - Two phones connecting to each other at the same moment both recognise each other.
 - Two phones either side of a week boundary recognise each other.
 - Making and checking a probe take the same time with 1 and with 128 contacts, and
-  with and without a match; a match changes nothing on the wire.
+  with and without a match; a match changes nothing on the wire except that recognised
+  friends may start a direct transfer (§3.1).
 - Over either cap, links stay anonymous and keep working.
 - Hidden (for everyone or for one friend): the `PROBE` is still 128 slots, sent at the
   same point and of the same size; the friend's phone shows "Nearby mesh node N"; "Hide
   me now" changes the link ID and closes links at once; switching back on recognises
-  again with the same keys; a hidden phone still recognises friends.
+  again with the same keys; a hidden phone still recognises friends. All four
+  combinations of A and B hiding from each other: recognition is as stated in §3.9,
+  and a direct transfer never starts when either has hidden.
 - A two-site relay test: two phones far apart, joined by two relaying phones, show each
   other as recognised. This documents §3.1; it is expected to "succeed".
 

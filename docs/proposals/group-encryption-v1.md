@@ -70,8 +70,10 @@ All eleven choices are decided (26 November 2026). Choice 11 came out of the rev
    only. Either of you can still pair as contacts separately.
 
 5. **Besides kicks, when do keys change?**
-   Decided (proposed by Claude, accepted by user, 26 November 2026): **on every removal, whenever a member marks one of their devices
-   as lost, and once a week for each member's own sending key.** The weekly change
+   Decided (proposed by Claude, accepted by user, 26 November 2026): **on every removal
+   and once a week for each member's own sending key.** (Marking a device as lost was
+   dropped with multiple devices, 27 November 2026: a lost phone's owner is removed and
+   rejoins with a new identity.) The weekly change
    is routine practice. *Corrected after the Codex review (finding 11):* it does
    not, on its own, limit how long someone who copied a phone can keep reading,
    because the new key travels over one-to-one sessions the copier may also be
@@ -147,8 +149,7 @@ libsignal's maintainers do not support its use outside Signal, and the Rust crat
 is not a supported public API. The sender-key functions add to that maintenance
 commitment.
 
-**Scope of version 1:** one device per member, as in the one-to-one milestone.
-Extra devices each need their own sending key and sessions; that is later work.
+**Scope:** one device per member, permanently (owner, 27 November 2026).
 
 ### 3.2 Pre-key bundles in the group log
 
@@ -164,8 +165,9 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
   to exactly one person. Libsignal accepts a bundle without them (the one-time
   pre-key is optional in `PreKeyBundle::new`). A replayed first message is still
   refused: libsignal's store records each base key used with a last-resort
-  pre-key pair (`mark_kyber_pre_key_used`), and the measurement in 3.9 confirmed
-  the refusal. Yap's store must keep that record permanently, not just in
+  pre-key pair (`mark_kyber_pre_key_used`). The size measurement in 3.9 does not
+  test this (each of its calls makes a fresh message); a separate replay and
+  restart test against the pinned library is still required. Yap's store must keep that record permanently, not just in
   memory.
 - A member replaces their bundle monthly with a new event. Pre-key IDs are
   never reused. The old pre-keys are kept for 24 hours after replacement, for
@@ -245,7 +247,9 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     restore after a crash, and many senders can share a key safely. (RFC 8439
     requires a nonce never to repeat under one key; at 24 random bytes a repeat
     is negligible.)
-  - **Key:** HKDF-SHA256 with the label key as input, the salt
+  - **Key:** HKDF-SHA256 with, as input, the sender's label key for a group
+    message (`0x01`) or the **recipient's inbox key** for a one-to-one piece
+    (`0x02`, see 3.11), the salt
     `Yap outer layer v1`, and as info: the kind (1 byte: `0x01` for a group
     message, `0x02` for a one-to-one piece), the
     group ID (16), the sender's member key (32), the recipient's member key (32,
@@ -304,8 +308,7 @@ unchanged, so the rules in `groups/` work as built.
 Each of a member's sending keys has a **generation number**, counting up from 1.
 A change of keys is either:
 - **justified by the group log:** any removal (by vote, by an admin, or of the
-  SuperAdmin) or a member marking one of their own devices as lost
-  (`RevokeOwnDevice`). The hand-over names the governance events it answers, so
+  SuperAdmin). The hand-over names the governance events it answers, so
   receivers can check the reason; or
 - **weekly:** the routine change (choice 5); or
 - **recovery:** a fresh generation for receivers that fell too far behind
@@ -355,7 +358,7 @@ generation. Instead, when a receiver accepts a piece, it saves, in the same
 commit, a record of: the sender, the SHA-256 of the exact libsignal message,
 the group, the generation and the acknowledgement it sent. When a piece
 arrives later, the receiver first removes the outer layer, which proves it
-came from someone holding the pair's label key. If the digest of the libsignal
+came from someone holding the recipient's inbox key (3.11). If the digest of the libsignal
 message inside matches a record for that sender, it resends the stored
 acknowledgement, at most once an hour per piece, and does not call libsignal.
 Otherwise it decrypts as normal. A `DuplicatedMessage` error with no matching
@@ -431,18 +434,19 @@ scramble removed them.
 
 **Measured sizes** with the pinned libsignal, using the program in
 [`experiments/sender-key-sizes/`](../../experiments/sender-key-sizes/README.md)
-(one desktop run on 27 November 2026, no mesh). It encodes the hand-over as laid
+(one desktop run on 28 November 2026, no mesh). It encodes the hand-over as laid
 out in section 5, and adds the bytes each piece carries outside libsignal: its
-label, hour, the outer layer and its length in a batch (70 bytes, exact by
-construction). Each figure is the largest seen in that case: evidence, not a
+label, hour, the outer layer and its four-byte length in a batch (72 bytes per
+piece, exact by construction, plus a five-byte `YGB1` prefix once per batch). The
+hand-over now includes the 32-byte inbox key of 3.11. Each figure is the largest seen in that case: evidence, not a
 proven maximum.
 
 | Item | Bytes |
 | --- | --- |
 | Pre-key bundle | about 1,775 |
 | Sender-key distribution message | 95–96 |
-| Piece, new session before any reply, naming 0 / 1 / 16 events | 2,036 / 2,068 / 2,548 |
-| Piece, open session, naming 0 / 1 / 16 events | 387 / 419 / 899 |
+| Piece, new session before any reply, naming 0 / 1 / 16 events | 2,070 / 2,102 / 2,582 |
+| Piece, open session, naming 0 / 1 / 16 events | 421 / 453 / 933 |
 | Group message carrying 100 bytes of text, before the outer layer's 44 | 204–205 |
 | Group message carrying 1,024 bytes of text, before the outer layer's 44 | 1,133–1,134 |
 
@@ -456,19 +460,25 @@ sizes allow:
   the header and outer layer;
 - at most 128 pieces per envelope, each under 4 KiB;
 - each piece is encrypted to its recipient over their session and marked with
-  a label from a key the pair share, so a recipient finds its piece without
-  trying the others.
+  a label from the recipient's inbox key (3.11), so a recipient finds its piece
+  without trying the others.
 
 | Event, group of 128 | Envelopes | Total size |
 | --- | --- | --- |
-| A removal naming 1 event, every session open | 127, one per remaining member | about 6.7 MB |
-| A removal naming 16 events, every session open | about 254, two per member | about 14.4 MB |
-| A removal naming 1 event, no sessions open yet (worst case) | about 635, five per member | about 33 MB |
-| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 520 KB |
-| One member's weekly key change | 1 | about 49 KB |
+| Removal, every session open, naming 1 event (453-byte pieces) | 127, one per remaining member | about 7.3 MB |
+| Removal, every session open, naming 16 events (933-byte pieces) | about 381, three per member | about 14.9 MB |
+| Removal, new sessions (none open yet), naming 1 event (2,102-byte pieces) | about 635, five per member | about 34 MB |
+| Removal, new sessions (none open yet), naming 16 events (2,582-byte pieces) | about 762, at least six per member | about 41 MB |
+| A newcomer joins | about 127 to the newcomer, and 5 batches back | about 530 KB |
+| One member's weekly key change | 1 | about 53 KB |
 
-The first row is about a tenth of one phone's carrier storage and the worst case
-about half, so one removal fits; several at once, or a busy crowd, can still
+The first row is about a tenth of one phone's carrier storage and the new-session,
+16-event row about two thirds. That row is the largest case measured, not a proven
+maximum: 126 pieces of 2,582 bytes are 325,332 bytes, beyond five batches' 286,720-byte
+piece budget, so each sender needs at least six batches (127 × 6 = 762 envelopes),
+before fallback copies and retries. Event lists matter as much as session state, so
+the one-event, five-batch row is not the worst case. Limits are enforced from the
+actual encoded bytes of each batch, never from these sampled sizes. One removal fits; several at once, or a busy crowd, can still
 push batches out, and resynchronising (3.7) repairs that more slowly. Sessions
 are normally opened when a member joins, which keeps removals near the first
 row.
@@ -495,6 +505,195 @@ without a coordinator. Two sides of a split would end up with two key states and
 no standard way to join them. It is also a further dependency, outside the
 library already reviewed for Yap. Revisit it if measurements show removals in
 large groups are too costly.
+
+### 3.11 Inbox keys and the batch container
+
+Written for the second review of local mesh v3.1 (its findings 7 and 13), 28 November
+2026. Needs review.
+
+**The problem.** A piece (a hand-over, an acknowledgement, a resynchronisation or
+recovery message between two members) must be findable and wrapped with a key its
+recipient already holds. Two recipients hold none of the sender's group keys: a
+**newcomer**, who has not received any yet, and a **member who fell behind**, who missed
+the hand-over that carried the new ones. Members may also never have paired with each
+other in person, so there is no pair secret to use either.
+
+**Inbox keys.** Every member makes random 32-byte **inbox keys** of their own, one set
+per group (never shared between groups, so pieces in two groups cannot be linked):
+- the **fallback inbox** travels in the member's signed `JoinRequest` (3.3). The
+  signature covers it, the group ID and that membership. It is in the governance log,
+  which members receive encrypted (3.5) and newcomers receive from their sponsor, so
+  every member knows every other member's fallback inbox, and a newcomer knows its own
+  from the start. A member keeps its fallback inbox for as long as it is a member, and
+  a returning member who rejoins makes a new one;
+- the **current inbox** is replaced at every key change of the member's own (3.6). The
+  new one travels inside the same hand-over pieces as their new sending key and label
+  key, numbered with the hand-over's generation, so a removed member never learns it
+  and a receiver never accepts an older one in place of a newer one;
+- a member keeps an old current inbox for 7 days after replacing it, and at most 8.
+
+Ordinary pieces go to the newest current inbox the sender knows. **Catch-up pieces**
+(resynchronisation, recovery requests and answers, and any retry of a piece that has had
+no acknowledgement for 24 hours) also go to the fallback inbox. So the **address** always works:
+two members who both missed each other's key changes, however long ago, can still reach
+each other. Whether they can then open each other's messages is covered by the catch-up
+bundle below. There is no time limit on being away while both stay members (owner, 28
+November 2026).
+
+The cost: someone removed from the group still knows the fallback inbox keys from
+before. With a modified app near the mesh, they can recognise catch-up traffic from S
+to R, hour after hour, and see its size. They cannot read it, and they cannot tell
+where R is from the address alone, because every nearby phone receives a last copy.
+This traffic is not unlinkable to them, though, and the other observations in local
+mesh v3.1 §1.4 (which envelopes a phone has seen, re-offering) still apply.
+
+**The catch-up bundle** (decided, owner, 28 November 2026). The bundle in a member's
+signed `JoinRequest` is its **catch-up bundle**: its signed pre-key and post-quantum
+last-resort pre-key are kept for as long as the member is in the group, used only for
+catch-up set-ups, and never replaced by the monthly bundle change (3.2). Because it is
+in the signed log, every member always has it, however far behind they are.
+
+**Catching up when sessions are gone.** Suppose S and R have no working session, and
+S opens one from a bundle R has since replaced, so R cannot read S's set-up message:
+1. R finds the piece by its label, but cannot authenticate it, so it treats it only as
+   a hint that S may need catching up.
+2. R opens a fresh session to **S's catch-up bundle** and sends S, to S's fallback
+   inbox, a catch-up piece holding R's current signed bundle and log heads.
+3. S can always read it (its catch-up pre-keys are kept), learns R's current bundle,
+   and the two resynchronise the missing log and keys over that session (3.7).
+4. If R is the one behind, the same happens the other way round.
+
+So end-to-end catch-up works as long as both are still members: the address (fallback
+inbox) always reaches them, and the catch-up bundle always opens. If one of them has
+been removed in the meantime, or a phone lost its catch-up keys (a reset), the app
+shows "Out of step with <member>: ask to be re-invited".
+
+**Limits on step 1:** a failed set-up proves nothing about who sent it. A removed member
+still knows fallback inboxes and could fake failed set-ups naming active members to make
+phones do catch-up work. So a phone sends at most one catch-up answer per claimed sender
+per hour and at most 10 an hour in total, and the answer goes only to the claimed
+sender's own catch-up bundle and inbox, so a faker gets nothing readable. Base keys used
+with catch-up pre-keys are recorded for the whole membership, so a replayed catch-up
+set-up is refused (3.2).
+
+**The cost of keeping catch-up pre-keys:** someone who later takes the whole phone, with
+its identity key and catch-up pre-keys, and who recorded earlier catch-up set-up
+messages, could open those set-ups. They would already hold the phone's live sessions
+and chats, so this adds little.
+
+**Piece labels and wrapping.** A piece from S to R:
+```
+label = HMAC-SHA256(inbox key of R, "Yap piece label v1" || S's member key (32) || hour (8))[0..16]
+```
+and is wrapped as kind `0x02` (3.4) with that inbox key as the input. R finds its pieces
+by working out, for each member S of each of its groups and each hour in the usual
+window (25 before to 1 after), the label it would receive under each inbox key it still
+holds: its fallback inbox, its newest current inbox and any older current inboxes it
+keeps. That is at most 27 × 127 × 10 = 34,290 entries per group, about 550 KB of tags.
+The table is updated as soon as membership changes, an inbox key is added or dropped,
+or the hour turns; collisions keep up to 4 candidates, as for address labels. Because
+the sender's key is in the label, pieces for one recipient from different senders do
+not share a label, so strangers cannot link batches by a repeated recipient.
+
+So:
+- a **newcomer** finds its first pieces with its own inbox key and the member keys in
+  the log its sponsor gave it, with no new primitive and no clear identity key: the
+  libsignal set-up message, which shows the sender's identity, is inside the outer
+  layer. This replaces the option of encrypting a newcomer's first piece with HPKE.
+- a **member who fell behind** still holds its fallback inbox, so it still finds
+  resynchronisation and recovery messages addressed to it, however long it was away.
+- the **cheap admission check** in 3.2 now runs after the outer layer is removed (one
+  AEAD decryption), which also proves the sender knew the recipient's inbox key.
+
+*What other members learn:* every member knows every other member's inbox keys, so a
+member could recognise and unwrap pieces addressed to someone else and learn their
+sizes, timing and who sent them, but not read them: the inside is a one-to-one
+libsignal message. Unwrapping the outer layer therefore proves only that the sender
+knew the inbox key, not which member it is: the inner libsignal session, group,
+recipient and generation checks decide that. A removed member keeps the fallback
+inboxes it knew, and the current inboxes until each member's next key change, which
+follows the removal. Signed governance logs keep fallback inboxes for as long as the
+log is kept, so they are never claimed as erased.
+
+**A single piece** (an acknowledgement, a resynchronisation request) travels as a
+class 1 envelope whose destination is the piece label and whose ciphertext is the
+wrapped piece.
+
+**A batch** travels as one class 2 envelope (local mesh v3.1 §1.1) whose destination is
+the sender's current group label, so members who are up to date recognise it straight
+away. Its ciphertext is:
+
+| Bytes | Field |
+| --- | --- |
+| 4 | `YGB1` |
+| 1 | piece count `n`, 1 to 128 |
+| 28 × `n` | per piece: label (16), hour (8, big-endian), length (4, big-endian) |
+| rest | the wrapped pieces, in the same order, back to back |
+
+Rules:
+- Each length is at most 4,096 bytes, the pieces together at most 56 KiB, and the
+  lengths add up exactly to the rest of the envelope. A batch that breaks any of these
+  is refused whole, before any piece is opened.
+- The count must be 1 to 128 and the whole directory present; lengths are added with
+  checked arithmetic before anything is sliced or allocated; a zero length, a length
+  of 44 bytes or less (the outer layer alone, with nothing inside), trailing bytes, or an hour outside the
+  window makes the batch invalid, refused whole.
+- A phone that is not up to date with the destination label scans the `n` labels
+  against its piece table: at most 128 lookups. For each match it tries to remove that
+  piece's outer layer with each candidate key for that label (up to 4), stopping at the
+  first that opens, and at most 32 outer decryptions per envelope in all. **Only a
+  piece whose outer layer opens counts as "for me"** under local mesh v3.1 §1.3, so a
+  copied label in an invalid batch does not make the phone keep it. Past 32 attempts
+  the envelope counts as not for this phone.
+- **The receive order** for any class 2 envelope, also referred to by local mesh v3.1
+  §1.3: (1) frame, stamp and flood checks; (2) label lookup, destination first, then
+  the batch directory; (3) for a batch matched only through the directory, the bounded
+  outer-layer opening above; (4) keep, drop or own message; (5) commit the carrier
+  store or seen record; (6) mesh `ACK`; (7) later, on the worker, inner libsignal
+  processing; (8) later still, the piece acknowledgement. Nothing in (7) or (8) changes
+  the `ACK` already sent.
+- An envelope kept because its destination matched a **current group label** is kept
+  without opening (step 3 is skipped). If the member later fails to decrypt it under
+  that sender's key in step 7, it deletes its carried copy. A copied group label can
+  therefore make members carry junk until step 7, not beyond.
+- Each piece found is then opened on its own. A piece that fails its inner checks is
+  skipped and logged; the other pieces are unaffected. A phone that kept the batch
+  carries it unchanged, whatever happened to its piece.
+- **Two acknowledgements, kept apart:** the mesh `ACK` means "this phone has handled
+  the envelope": it is sent both after storing and after dropping a last copy (local
+  mesh v3.1 §1.3), so a sender never treats it as proof that anyone holds the batch.
+  The piece acknowledgement
+  means "this member installed this generation" and travels later, as a single piece
+  back to the sender, after the commit in 3.6 ("Repeated pieces").
+- Pieces carry their label and hour in their own associated data (3.4), so a sender
+  can move unacknowledged pieces into a new, smaller batch unchanged. A **single
+  piece** in its own class 1 envelope uses the same piece associated data (label and
+  hour), not the envelope header, so the same bytes are valid in either form.
+- An authenticated piece acknowledgement settles that recipient's pending piece even if
+  the mesh `ACK` was lost. It settles nothing for other recipients, and never lets a
+  carrier delete a batch.
+
+*What strangers see:* a class 2 envelope with a batch's structure, its piece count and
+each piece's size and hour. That shows a key change is happening, as its size already
+did (local mesh v3.1 §1.1). Padding the count is possible but not proposed.
+
+The kind `0x02` vectors in
+[`experiments/outer-layer-vectors/`](../../experiments/outer-layer-vectors/README.md)
+change to use the recipient's inbox key, and piece-label vectors are added.
+
+**Temporary groups** (3.10) are new groups: every member makes new fallback and current
+inboxes for them, carried in their acceptance; nothing is reused from the original
+group.
+
+**Tests also required:** two members who both missed each other's key changes for 30
+days, and for 8 rapid changes, still catch up through fallback inboxes; a set-up
+message to a deleted pre-key gets a catch-up answer; an older inbox is never accepted
+over a newer one; a copied label in an invalid batch is not kept.
+
+**Test:** a newcomer with no group keys receives its first piece, through a stranger,
+inside a batch from a member it has never paired with; a member that missed one
+generation recovers through resynchronisation; a batch with a bad length is refused
+whole; a batch with one corrupted piece still delivers the other pieces.
 
 ### 3.10 Temporary groups for cut-off members
 
@@ -645,8 +844,10 @@ revision and the measurement in 3.9. This is the proposal's own author checking
 it: **not an independent review**.
 
 1. **No one-time pre-keys.** *Resolved:* replay of a first message is refused
-   by libsignal's record of used base keys, confirmed by measurement. Yap must
-   store that record permanently and replace bundles monthly (3.2).
+   by libsignal's record of used base keys, according to its source. The size
+   measurement did not test it: a separate replay and restart test against the
+   pinned library is still required. Yap must store that record permanently and
+   replace bundles monthly (3.2).
 2. **Checkpoints and concurrent branches.** *Replaced after the Codex review:*
    newcomers receive the full governance log instead (3.3, step 5).
 3. **Knowing a hand-over arrived.** *Proposed, revised after Codex findings 8
@@ -666,7 +867,7 @@ it: **not an independent review**.
      kind (1: justified,
      weekly or recovery), the governance events it answers (count of at most
      16, then 32 each; none unless justified), distribution ID (16), label key
-     (32), the distribution message (length-prefixed, at most 256 bytes).
+     (32), the new inbox key (32, 3.11), the distribution message (length-prefixed, at most 256 bytes).
    - Acknowledgement: `YGA1`, group ID (16), the hand-over sender's member key
      (32), generation number (4).
    - Group message header, inside the encryption: `YGM1`, group ID (16), sender
@@ -674,9 +875,10 @@ it: **not an independent review**.
      at most `MAX_PARENTS`, then 32 each), kind (1), payload.
 
    Exact limits and test vectors come with the code review.
-5. **Storage.** *Proposed:* the endpoint's encrypted snapshot and staged commits
-   (see the [protocol proposal](../protocol-proposal.md)), extended with a
-   sender-key store. Advancing a sending key is committed together with the
+5. **Storage.** *Proposed:* the SQLCipher store of the
+   [local storage proposal](local-storage-v1.md), extended with a
+   sender-key store (staged commits stay as in the
+   [protocol proposal](../protocol-proposal.md)). Advancing a sending key is committed together with the
    outgoing envelope, and retries resend the stored bytes. Old sending keys are
    deleted by local elapsed time, never by the sender's clock. Everything stays
    excluded from backups.

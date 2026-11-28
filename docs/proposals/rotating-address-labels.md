@@ -54,11 +54,16 @@ removes the permanent header signals; it does not make traffic unlinkable in gen
 
 **At pairing.** The pair secret is set up inside [encrypted pairing](encrypted-pairing.md):
 the phone with the smaller identity key makes a random 32-byte secret, sends it inside
-the encrypted pairing channel, and both phones' signed confirmations cover it. Pairing
-only completes when both confirmations validate, so both phones already hold the same
-secret when the contact becomes ready. No later message is needed to install it, and
+the encrypted pairing channel, and both phones' signed confirmations cover it. The
+secret is installed with the contact when the bootstrap finishes and the phone is
+Ready (encrypted pairing §3), so a Ready phone already holds it. A phone that
+validated the confirmations but is not yet Ready holds nothing it can use. No later message is needed to install it, and
 today's empty first session message (kind 03) and its cached reply stay as they are.
-The secret is stored as the secret for the week pairing happened in.
+The initiator also sends the **starting week number**, the week of its own working
+clock, and both confirmations sign it together with the secret, so the two phones
+always agree which week the secret belongs to, even if they pair either side of a week
+boundary. A phone refuses to pair if the starting week is not its own current week or
+the one either side. Each phone stores the secret with that starting week.
 
 **Each week.** Weeks are numbered from the Unix epoch:
 
@@ -70,11 +75,23 @@ pairSecret[week + 1] = HKDF-SHA256(ikm  = pairSecret[week],
 ```
 
 Both phones work this out on their own, so nothing is sent and the two phones cannot
-fall out of step, even if they never meet again. A phone keeps the secrets for its
-current week and the previous week, works out the next week's when it needs it, and
-deletes a week's secret 26 hours after that week ends. It never steps backwards: if its
-clock goes back, it keeps the newest secret it has. A clock more than about a day wrong
-across a week boundary stops labels matching until it is corrected.
+fall out of step, even if they never meet again. Per contact, a phone keeps the secrets
+for its current week and the previous week, and works out the next week's when it
+needs it (labels near the boundary, recognition, §4). Weeks before the starting week
+have no secret: envelopes created before the contact's starting week are refused.
+
+**Stepping and deleting.**
+- A week's secret is deleted 26 hours after that week ends, by the phone's working time
+  ([local storage](local-storage-v1.md) §8). Stepping forward and deleting happen in
+  one transaction per contact, so a crash leaves either the old state or the new one.
+- A phone that was off for a while steps forward from its newest saved week, one step
+  per week missed, when it next runs. At most 520 steps (ten years) are taken; more
+  than that is treated as a clock error.
+- Stepping that would delete secrets because the working time jumped forward more than
+  2 days at once waits for the user to confirm the new time (local storage §8).
+- It never steps backwards. A restored older copy of the phone's data can still hold
+  older secrets; rollback protection for restored copies is a separate open problem
+  (local storage, open questions).
 
 Every key below is made from the secret for the week of the envelope's authenticated
 creation time, each with its own salt:
@@ -111,15 +128,17 @@ and every key made from it, for as long as the pair exists.
 
 The public bundles, the signed confirmations, the pair secret and the first libsignal
 message (which shows the sender's identity key) all travel inside the encrypted pairing
-channel, on the direct local link the two phones paired over. This is enforced in how
+channel, on a direct local link between the two phones. This is enforced in how
 packets are routed, not inferred from what a packet contains: pairing packets go in a
-separate queue bound to that one link, and never enter the outbox, a carrier's store,
-another link or the internet relay. Today `SecureModel.pump()` confines only signed
+separate queue bound to the attempt's current authenticated link (the first one, or the
+link of a successful resume handshake, encrypted pairing §3), and never enter the
+outbox, a carrier's store, any other link or the internet relay. Today `SecureModel.pump()` confines only signed
 confirmations (through `linkFor()`) and sends other pending packets, including the
 bootstrap, to every local link and the internet relay; that changes.
 
-If the pairing link closes before both confirmations validate, the pairing attempt is
-cancelled and has to be repeated. Only after pairing completes does the pair send
+If the pairing link closes before the phone is Ready, the attempt may resume on another
+authenticated link within its window, or is cancelled at the deadline (encrypted
+pairing §3); it never moves to a carrier. Only after pairing completes (Ready) does the pair send
 anything through carriers, and then always with labels and the outer wrapper.
 
 ### 3. Hourly labels
@@ -185,8 +204,9 @@ and the existing vectors move to the 70-byte binding.
 
 - **Carriers:** nothing. They never read labels.
 - **Duplicate detection and relay keys:** unchanged (they hash the whole envelope).
-- **The one-time destination** in a pairing QR is used only to find the pairing link
-  (§2).
+- **The QR's bundle commitment** (32 bytes, sent in `PAIR_FIND`) is used only to find
+  the pairing link (§2; encrypted pairing §3). It is not a destination, and no
+  envelope destination is taken from the QR.
 - **Internet relay server:** off in this update and shown in the app as "Coming soon"
   (owner, 27 November 2026). Nothing is sent to or fetched from it, so no fixed mailbox
   value reaches nearby traffic. Its return needs its own design.
@@ -202,19 +222,17 @@ secret with you, so nothing in this proposal applies to the one-to-one pieces be
 you. Those pieces never use a pair secret, even between members who are also paired
 contacts:
 
-- **Members who already hold each other's group keys** wrap and address their
-  one-to-one pieces with the group's own keys: the sender's group label key, as kind
-  `0x02` in group encryption §3.4 (owner, 27 November 2026). Strangers see only group
-  labels. Other members of the group could tell who a piece is for; they already know
-  who the members are.
-- **A newcomer** holds no group keys yet, so the first pieces sent to it cannot be
-  wrapped that way, and the first libsignal message to it shows the sender's identity
-  key. Options for review: encrypt that first piece to a one-time public key in the
-  newcomer's join record, using HPKE (RFC 9180, a published standard); or accept that
-  the sender's identity key shows once per new pair. The first is recommended. Neither
-  may fall back to static identity-key Diffie-Hellman or an assumed shared secret.
-- The group proposal's cheap admission check on a prekey message's clear identity
-  needs to be reconciled with this.
+- Pieces are addressed and wrapped with the group's own keys (owner, 27 November
+  2026): each member's **inbox key**, published in their join request and replaced at
+  each of their key changes ([group encryption §3.11](group-encryption-v1.md)).
+  Strangers see only random-looking labels. Other members could tell who a piece is
+  for; they already know who the members are.
+- A **newcomer** knows its own inbox key from the start, so even its first pieces,
+  including the libsignal set-up message that shows the sender's identity key, are
+  hidden inside the outer layer. No new primitive is needed, and nothing falls back to
+  static identity-key Diffie-Hellman or an assumed shared secret.
+- The group proposal's cheap admission check now runs after the outer layer is
+  removed.
 
 These pieces travel inside group batches (mesh v3.1 §1.5) and are written up fully in
 the group encryption proposal. Group members are never added to the contact list or
@@ -228,23 +246,27 @@ the label table here.
 2. Hour-long epochs: shorter means less linkability but a bigger table and more
    sensitivity to clock differences. Today a receiver refuses envelopes created more
    than five minutes in its future and checks expiry; it does not otherwise require
-   clocks to agree. Week boundaries add a second clock dependency (§1).
+   clocks to agree. Week boundaries add a second clock dependency (§1); the clock rule
+   is in local storage §8.
 3. A friend's phone in the wrong hands reveals the current pair secret, and with it
    every later one: every label, outer key and recognition tag for that pair until the
    contact is removed.
-4. Group members who are not paired contacts (§7), especially the newcomer's first
-   piece.
+4. Group members who are not paired contacts (§7), through inbox keys.
 
 ## Test plan
 
 - Fixed test vectors for the weekly step, `labelKey`, `linkKey`, `tag` and the kind
   `0x03` outer layer with the 70-byte binding.
 - Pair secret: both phones hold it when pairing completes; a pairing link closing
-  before then cancels pairing; both phones step to the same secret across one, two and
-  ten weeks without meeting; a week's secret is deleted 26 hours after the week ends; a
-  clock moved back never brings back a deleted secret.
-- Pairing traffic is never offered to a carrier, another link or the internet relay,
-  on every transport.
+  before then cancels pairing; pairing either side of a week boundary gives both phones
+  the same starting week; both phones step to the same secret across one, two and ten
+  weeks without meeting; a week's secret is deleted 26 hours after the week ends; a
+  clock moved back never brings back a deleted secret; a crash during catch-up leaves a
+  consistent state; envelopes from before the starting week are refused.
+- Pairing traffic is never offered to a carrier or the internet relay, on every
+  transport, and only goes over a link authenticated for that attempt (the first, or
+  one that passed the resume handshake); a closed pairing link before Ready resumes
+  on another link within the window.
 - Two endpoints exchange messages across an hour boundary, across a week boundary, and
   with ±5 minutes skew.
 - The table: a new contact's mail matches straight away; a removed contact's mail stops

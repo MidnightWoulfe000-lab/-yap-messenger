@@ -38,8 +38,8 @@ can be read on its own:
 | ALL | unlimited | unlimited |
 
 - **v3.1 rules:** a holder with 2 or more copies gives half to a phone that does not
-  already hold a split of it. A holder with one copy sends it to every phone it meets
-  that has not been sent a last copy of it, and keeps its own. Only the recipient (one-to-one) or
+  already hold a split of it. A holder with one copy, or with no hops left, sends a last copy to every phone it meets
+  that has not been sent one, and keeps its own allocation. Only the recipient (one-to-one) or
   members (group) keep a last copy; members then hold one copy themselves. Everyone
   else drops it, and still takes a split later. No `DELIVERED`.
 - **Ask-mine rules** (the first v3.1 draft, for comparison): a holder with one copy
@@ -49,7 +49,11 @@ can be read on its own:
 - **Unlimited:** every holder gives it to every phone that has not got it.
 - In every rule a message lives 24 hours. The hop byte starts at 8, the sender sends it
   unchanged, and each carrier forward lowers it by one; a carrier never stores 0, a
-  recipient or member may accept 0.
+  recipient or member may accept 0. Under v3.1 a holder cannot tell a stranger from a
+  member before sending, so with no hops left a holder sends a last copy to any phone
+  that has not been sent one (counted as a send and against the budgets), whether it
+  holds one copy or several. A split holder keeps its allocation and debits nothing; a
+  recipient or member keeps the copy and a stranger drops it. The ask-mine rule keeps its recipient check, as that rule asks first.
 
 Spray 255 stands in for 256, because the copy count is one byte on the wire.
 
@@ -109,3 +113,21 @@ Spray 255 stands in for 256, because the copy count is one byte on the wire.
   frames, copy reservations, or attackers other than junk messages. No lying phones.
 - Load is light: about one message per phone per day.
 - Five seeds and three fixed groups per size give limited independent evidence.
+- Carrier storage is counted in envelopes, not bytes, and nothing is evicted. The model
+  does not show bounded bytes, radio capacity or battery cost, and it does not show
+  that 96 or 255 copies are the best choice.
+- Zero-hop member custody, receipt traffic and delay, finite or persistent seen-caches,
+  the real offer, want and reservation state machine, packet ordering and shared
+  effective clocks are not modelled. Member-only retention uses the exact member list,
+  not anything a phone could prove from envelope bytes.
+
+## Speed
+
+A run of the 800-phone `crowd` scenario used to take about 20 minutes. Profiling showed
+the time was in link building (a pair test for every two phones and a hash set whose
+keys collide), then in re-offering every held message on links that stayed blocked by
+their budget. Link building now skips full phones and existing links before the exact
+distance test, and a blocked link stops scanning once its budget is spent. Both give
+the same results as before: `--quick --only scattered` and `--quick --only campus`
+produced byte-identical `results.csv` files before and after (the final-hop change
+below came after that check).

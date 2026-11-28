@@ -241,6 +241,7 @@ public class CopyCountSim {
         Run(Scenario sc, Config cfg, long seed) {
             this.sc = sc; this.cfg = cfg; this.seed = seed;
             world = new World(sc, seed);
+            askMine = cfg.direct().rule() == Rule.SPRAY || cfg.group().rule() == Rule.SPRAY;
             n = sc.phones();
             held = new ArrayList<>();
             for (int p = 0; p < n; p++) held.add(new ArrayList<>());
@@ -352,7 +353,11 @@ public class CopyCountSim {
             // hops[] holds forwards left, like the hop byte. The sender sends it unchanged;
             // each carrier forward lowers it by one. An endpoint may accept 0; a carrier never stores 0.
             int newHops = a == m.sender ? m.hops[a] : m.hops[a] - 1;
-            if (newHops < 0 || (newHops == 0 && !endpoint)) return 0;
+            if (newHops < 0) return 0;
+            // v3.1: a holder cannot tell a stranger from a member before sending, so with no hops
+            // left it sends a last copy to anyone (split holders too, debiting nothing) and the
+            // stranger drops it. Earlier rules refuse a non-endpoint at zero hops before sending.
+            if (newHops == 0 && !endpoint && pol.rule() != Rule.V31) return 0;
             if (pol.rule() == Rule.V31) return offerV31(m, a, b, t, linkUsed, recv, dir, endpoint, newHops);
             int give;
             boolean keep;            // whether a keeps its copy count unchanged
@@ -396,7 +401,8 @@ public class CopyCountSim {
         }
 
         int offerV31(Msg m, int a, int b, double t, int[] linkUsed, int[] recv, int dir, boolean endpoint, int newHops) {
-            boolean last = m.copies[a] == 1;
+            // A split holder with no hops left sends a last copy too and keeps its allocation.
+            boolean last = m.copies[a] == 1 || newHops == 0;
             // has[]: holds a split allocation (or is the sender). gotLast[]: was sent a last copy,
             // whatever it did with it. Either declines another last copy; only has[] declines a
             // split, so recipients, members and strangers who got a last copy all answer alike.
@@ -427,12 +433,23 @@ public class CopyCountSim {
             return 1;
         }
 
+        boolean askMine;
+
         void exchange(int[] l, double t, int[] recv) {
             int a = l[0], b = l[1];
             int[] used = new int[2];
             boolean blocked = false;
-            for (Msg m : new ArrayList<>(held.get(a))) if (offer(m, a, b, t, used, recv, 0) < 0) blocked = true;
-            for (Msg m : new ArrayList<>(held.get(b))) if (offer(m, b, a, t, used, recv, 1) < 0) blocked = true;
+            // Once a direction's budget is spent it stays spent for this exchange, so a later offer can
+            // only answer "no" or "blocked" and change nothing (the one exception is the ask-mine
+            // DELIVERED delete). When the link is already known to be blocked, stop scanning.
+            for (Msg m : new ArrayList<>(held.get(a))) {
+                if (offer(m, a, b, t, used, recv, 0) < 0) blocked = true;
+                if (blocked && !askMine && (used[0] >= linkBudget || recv[b] >= phoneBudget)) break;
+            }
+            for (Msg m : new ArrayList<>(held.get(b))) {
+                if (offer(m, b, a, t, used, recv, 1) < 0) blocked = true;
+                if (blocked && !askMine && (used[1] >= linkBudget || recv[a] >= phoneBudget)) break;
+            }
             l[2] = blocked ? 1 : 0;
         }
 
@@ -444,27 +461,37 @@ public class CopyCountSim {
                 int cx = clamp((int) (world.x[p] / cell), cells), cy = clamp((int) (world.y[p] / cell), cells);
                 grid.computeIfAbsent(cx * cells + cy, k -> new ArrayList<>()).add(p);
             }
-            HashSet<Long> inRange = new HashSet<>();
+            // Drop links whose phones are now out of range (same distance test as before).
+            for (Iterator<Map.Entry<Long, int[]>> it = links.entrySet().iterator(); it.hasNext(); ) {
+                Map.Entry<Long, int[]> e = it.next();
+                int[] l = e.getValue();
+                if (Math.hypot(world.x[l[0]] - world.x[l[1]], world.y[l[0]] - world.y[l[1]]) > RANGE) {
+                    linkCount[l[0]]--; linkCount[l[1]]--;
+                    linksOf.get(l[0]).remove(e.getKey()); linksOf.get(l[1]).remove(e.getKey());
+                    it.remove();
+                }
+            }
+            // Candidates are only pairs in range, not linked yet, with a free slot on both phones.
+            // Slots only fill during the loop below, so leaving the others out changes nothing.
+            // The squared test is a cheap pre-filter; the exact hypot test still decides.
+            final double loose = RANGE * RANGE * (1 + 1e-9);
             List<long[]> candidates = new ArrayList<>();
             for (int p = 0; p < n; p++) {
+                if (linkCount[p] >= LINK_CAP) continue;
                 int cx = clamp((int) (world.x[p] / cell), cells), cy = clamp((int) (world.y[p] / cell), cells);
                 for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) {
                     List<Integer> c = grid.get((cx + dx) * cells + (cy + dy));
                     if (c == null) continue;
                     for (int q : c) {
-                        if (q <= p) continue;
-                        double d = Math.hypot(world.x[p] - world.x[q], world.y[p] - world.y[q]);
-                        if (d <= RANGE) { long k = key(p, q); inRange.add(k); candidates.add(new long[]{k, (long) (d * 1000)}); }
+                        if (q <= p || linkCount[q] >= LINK_CAP) continue;
+                        double ex = world.x[p] - world.x[q], ey = world.y[p] - world.y[q];
+                        if (ex * ex + ey * ey > loose) continue;
+                        double d = Math.hypot(ex, ey);
+                        if (d <= RANGE) {
+                            long k = key(p, q);
+                            if (!links.containsKey(k)) candidates.add(new long[]{k, (long) (d * 1000)});
+                        }
                     }
-                }
-            }
-            for (Iterator<Map.Entry<Long, int[]>> it = links.entrySet().iterator(); it.hasNext(); ) {
-                Map.Entry<Long, int[]> e = it.next();
-                if (!inRange.contains(e.getKey())) {
-                    int[] l = e.getValue();
-                    linkCount[l[0]]--; linkCount[l[1]]--;
-                    linksOf.get(l[0]).remove(e.getKey()); linksOf.get(l[1]).remove(e.getKey());
-                    it.remove();
                 }
             }
             candidates.sort(Comparator.comparingLong(c -> c[1]));    // nearest first
@@ -628,13 +655,14 @@ public class CopyCountSim {
                             ms(rs, Row::p90DelayH, 1), ms(rs, Row::strangers, 0), ms(rs, Row::dropped, 0), ms(rs, Row::transmissions, 0));
                     }
                 }
-                w.printf("%n### Carrier storage (most envelopes held by one phone at once)%n%n| Config | Busiest phone | Average phone |%n| --- | --- | --- |%n");
+                w.printf("%n### Carrier storage (most envelopes held by one phone at once)%n%nBusiest phone is the mean over seeds of each seed's peak; the highest peak is the largest value seen in any seed. Neither counts bytes.%n%n| Config | Busiest phone (mean of seed peaks) | Highest peak, any seed | Average phone |%n| --- | --- | --- | --- |%n");
                 Map<String, List<Row>> byCfg = new LinkedHashMap<>();
                 for (Row r : sc.getValue().get("one-to-one")) byCfg.computeIfAbsent(r.config(), k -> new ArrayList<>()).add(r);
                 for (var c : byCfg.entrySet()) {
                     Config cfg = CONFIGS.stream().filter(x -> x.name().equals(c.getKey())).findFirst().orElseThrow();
-                    w.printf(Locale.ROOT, "| %s / %s | %s | %s |%n", cfg.direct().label(), cfg.group().label(),
-                        ms(c.getValue(), r -> r.peakStore(), 0), ms(c.getValue(), Row::meanPeakStore, 0));
+                    int top = c.getValue().stream().mapToInt(Row::peakStore).max().orElse(0);
+                    w.printf(Locale.ROOT, "| %s / %s | %s | %d | %s |%n", cfg.direct().label(), cfg.group().label(),
+                        ms(c.getValue(), r -> r.peakStore(), 0), top, ms(c.getValue(), Row::meanPeakStore, 0));
                 }
             }
         }
