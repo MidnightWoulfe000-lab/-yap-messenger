@@ -1,64 +1,91 @@
-# Findings: how many copies
+# Findings: how many copies, and what the private last-copy rule costs
 
-From the run of 27 November 2026, 5 seeds per scenario (full tables in
-[results/summary.md](results/summary.md)). These are model outputs under the
-assumptions in the [README](README.md), not measurements on phones.
+From the run of 27 November 2026 (second run, after the simulator was corrected for the
+second Codex review), 5 seeds per scenario. Full tables are in
+[results/summary.md](results/summary.md). These are model outputs under the assumptions
+in the [README](README.md), not measurements on phones. They compare rules against each
+other on the same movement; they do not predict real delivery rates.
 
-## 1. Where people all pass through the same busy places, the count barely matters
+## 1. The private rule delivers as well as asking "is this yours?"
 
-In `campus`, `town`, `crowd` and `sparse`, every rule reached every recipient and every
-group member within 24 hours, including today's 12 copies. More copies only shortened
-the wait: in `town`, the median one-to-one delay fell from 2.2 hours at 12 copies to 1.1
-hours at 96, and 90% arrived within 9.0 and 7.2 hours. Overnight, when everyone is at
-home, sets most of the long waits.
+The v3.1 rule (a last copy goes to every phone met, only the recipient or members keep
+it) and the earlier rule (a last copy goes only to a phone that says it is the
+recipient or a member) reached the same share of recipients in every scenario, with the
+same delays:
 
-## 2. Where people stay in their own neighbourhoods, 12 and 32 are too few
+| 96 / 255 copies | v3.1 rule | Ask-mine rule | Unlimited |
+| --- | --- | --- | --- |
+| One-to-one reached, `district` | 99% | 99% | 100% |
+| One-to-one reached, `scattered` | 97% | 97% | 100% |
+| Group of 30, every member reached, `district` | 97% | 97% | 100% |
+| Group of 30, every member reached, `scattered` | 85% | 81% | 98% |
+| One-to-one, 90% arrived within, `scattered` | 15.1 h | 15.1 h | |
 
-In `district` and `scattered`, people mostly visit the places nearest home, so a message
-has to cross from one neighbourhood to another on the few people who travel.
+This needed one detail: a phone that was sent a last copy must still accept a split
+share of the same message later. When the simulator refused those too, one-to-one
+delivery in `scattered` fell from 98% to 95% in a quick check, because phones that had
+seen a last copy could no longer help spread the split copies.
 
-| One-to-one copies | 12 (today) | 24 | 48 | 96 | unlimited |
+## 2. The cost is radio traffic, about as much as unlimited flooding
+
+| Sends per message | v3.1 rule | Ask-mine rule | Unlimited |
+| --- | --- | --- | --- |
+| One-to-one, `crowd` (800 phones) | 849 | 95 | 798 |
+| One-to-one, `district` (400) | 443 | 76 | 395 |
+| One-to-one, `scattered` (120) | 140 | 47 | 115 |
+| Group of 30, `crowd` | 980 | 280 | 799 |
+| Group of 30, `district` | 561 | 218 | 399 |
+
+Under the v3.1 rule nearly every phone that meets a holder is sent the message once as
+a last copy, and some are also sent a split share, so each message reaches nearly every
+phone over the air, a little more than flooding. Unlike flooding, the phones that only
+get a last copy store nothing and pass nothing on. At this light load (about one
+message per phone per day) every link stayed within its limits. Under heavy chat load
+this traffic would fill links sooner, and that is not tested here.
+
+## 3. Storage and spam storage stay bounded
+
+- **Strangers storing a message** stay at about the copy count: about 90 strangers
+  for a 96-copy one-to-one message and about 250 for a 255-copy junk message in the
+  large towns, the same as the ask-mine rule. Unlimited stores junk on every phone.
+- **Carrier storage:** the busiest phone held at most about 210 envelopes with the
+  v3.1 rule, against about 160 with ask-mine and up to about 900 with unlimited
+  flooding in the 800-phone crowd. The carrier store holds 10,000.
+
+## 4. Copy counts, tested one at a time
+
+Where everyone passes through the same busy places (`campus`, `town`, `crowd`,
+`sparse`), every count reached everyone. In the neighbourhood scenarios:
+
+| One-to-one copies (groups at 255) | 12 | 24 | 48 | 64 | 96 |
 | --- | --- | --- | --- | --- | --- |
-| Reached, `district` | 74% | 85% | 94% | 99% | 100% |
-| Reached, `scattered` | 77% | 89% | 95% | 97% | 100% |
+| Reached, `district` | 75% | 85% | 94% | 97% | 99% |
+| Reached, `scattered` | 78% | 88% | 94% | 96% | 97% |
 
-| Group copies, group of 30 | 32 | 64 | 128 | 255 | unlimited |
+| Group copies (one-to-one at 96), group of 30 | 32 | 64 | 128 | 192 | 255 |
 | --- | --- | --- | --- | --- | --- |
-| Messages reaching **every** member, `district` | 39% | 72% | 91% | 96% | 100% |
-| Messages reaching every member, `scattered` | 41% | 64% | 73% | 79% | 92% |
-| Members reached, `district` | 96% | 99% | 99.7% | 99.9% | 100% |
+| Every member reached, `district` | 42% | 71% | 92% | 97% | 97% |
+| Every member reached, `scattered` | 40% | 65% | 75% | 81% | 85% |
+| Members reached, `district` | 96% | 99% | 100% | 100% | 100% |
 
-Most members get a group message even at 32 copies; what fails is reaching the last
-few. Groups of 128 did well at any count, because the members themselves carry it to
-each other.
+One-to-one gains little above 64 and group gains little above 192 in `district`, but
+both still gain in `scattered`. 96 and 255 remain reasonable choices; nothing here
+shows they are the best ones.
 
-## 3. The cost is spam reach, not storage
+## 5. Junk
 
-- **Storage:** at about one message per phone per day, the busiest phone held at most
-  about 165 envelopes with 96 / 255 copies, and up to 520 with unlimited copies in
-  the 800-phone crowd. The carrier store holds 10,000. Storage is not the limit at this load.
-- **Spam:** a junk group message, with a label nobody recognises, is carried by about as
-  many strangers as it has copies: 31 at 32, 254 at 255 (where that many phones exist).
-  Unlimited and hand-on 4 both spread junk to **every** phone in every scenario. Since a
-  sender chooses its own copy count, the maximum allowed is what spam gets.
-
-## 4. Hand-on 4 is unlimited flooding in practice
-
-Every holder passing a message on 4 times reached every phone, for junk as well. It
-delivers well but gives no bound at all, which confirms the review's finding that it
-needs replacing.
-
-## What this suggests (for the owner to decide)
-
-- One-to-one: 96 copies reached 97 to 99% in the hard scenarios, 48 reached 94 to 95%.
-- Group: 255, the most one byte allows, reached every member of a group of 30 in 79 to
-  96% of messages.
-- Either way, a spammer gets the same maximum, so the effort stamp should cost more for
-  more copies (a proposal, needing review).
+Junk with 255 copies is stored by about as many strangers as it has copies, under
+either rule. With the v3.1 rule it is also sent once to most other phones, which drop
+it. It never travels further than one step from a holder that way. Hand-on rules were
+not rerun.
 
 ## Limits
 
 - Six invented worlds. Real movement may be better or worse mixed than any of them.
-- Light load: busy crowds with heavy traffic would fill links and stores sooner.
+- Light load, no slow mode, no byte limits, no lost frames, no control-frame traffic,
+  and phones know perfectly what they already hold.
 - No phones switched off, leaving for good or running out of battery.
+- No lying phones.
 - Receipts are instant, so one-to-one senders stop offering sooner than in reality.
+- Five seeds and three fixed groups per size: small differences (a few per cent) may be
+  noise.

@@ -19,8 +19,8 @@ public class CopyCountSim {
     static final double DT = 10;                       // seconds per step
     static final double RANGE = 40;                    // metres
     static final int LINK_CAP = 12;                    // links per phone (v2 slots)
-    static final int LINK_BUDGET = 7;                  // envelopes per link per step (40 a minute)
-    static final int PHONE_BUDGET = 17;                // envelopes a phone takes in per step (100 a minute)
+    static final double LINK_PER_MIN = 40;             // envelopes per link direction per minute
+    static final double PHONE_PER_MIN = 100;           // envelopes a phone takes in per minute
     static final int MAX_HOPS = 8;
     static final double LIFETIME = 24 * 3600;
     static final double CREATE_SPAN = 24 * 3600;       // messages are made during the first day
@@ -42,12 +42,19 @@ public class CopyCountSim {
         new Scenario("district", 400, 4000, 40, 40, 30, 180, 0.05, false),
         new Scenario("scattered", 120, 4000, 30, 40, 30, 240, 0.05, false));
 
-    enum Rule { SPRAY, EPIDEMIC, HANDON }
+    /**
+     * V31: the v3.1 rules. Splits for 2+ copies; a last copy goes to every phone not yet
+     * sent it, the holder keeps it, and only the recipient or a member keeps what it gets.
+     * No DELIVERED. SPRAY: the earlier rules, where a last copy goes only to a phone that
+     * says it is the recipient or a member, and DELIVERED deletes the delivering copy.
+     */
+    enum Rule { V31, SPRAY, EPIDEMIC, HANDON }
 
     record Policy(Rule rule, int copies) {
         String label() {
             return switch (rule) {
-                case SPRAY -> "spray " + copies;
+                case V31 -> "v3.1 " + copies;
+                case SPRAY -> "ask-mine " + copies;
                 case EPIDEMIC -> "unlimited";
                 case HANDON -> "hand-on " + copies;
             };
@@ -56,13 +63,20 @@ public class CopyCountSim {
 
     record Config(String name, Policy direct, Policy group) {}
 
+    // One-to-one counts vary with groups fixed at 255, then group counts vary with
+    // one-to-one fixed at 96, so each can be read on its own.
     static final List<Config> CONFIGS = List.of(
-        new Config("A", new Policy(Rule.SPRAY, 12), new Policy(Rule.SPRAY, 32)),
-        new Config("B", new Policy(Rule.SPRAY, 24), new Policy(Rule.SPRAY, 64)),
-        new Config("C", new Policy(Rule.SPRAY, 48), new Policy(Rule.SPRAY, 128)),
-        new Config("D", new Policy(Rule.SPRAY, 96), new Policy(Rule.SPRAY, 255)),
-        new Config("E", new Policy(Rule.EPIDEMIC, INF), new Policy(Rule.EPIDEMIC, INF)),
-        new Config("F", new Policy(Rule.SPRAY, 12), new Policy(Rule.HANDON, 4)));
+        new Config("D12", new Policy(Rule.V31, 12), new Policy(Rule.V31, 255)),
+        new Config("D24", new Policy(Rule.V31, 24), new Policy(Rule.V31, 255)),
+        new Config("D48", new Policy(Rule.V31, 48), new Policy(Rule.V31, 255)),
+        new Config("D64", new Policy(Rule.V31, 64), new Policy(Rule.V31, 255)),
+        new Config("P", new Policy(Rule.V31, 96), new Policy(Rule.V31, 255)),
+        new Config("G32", new Policy(Rule.V31, 96), new Policy(Rule.V31, 32)),
+        new Config("G64", new Policy(Rule.V31, 96), new Policy(Rule.V31, 64)),
+        new Config("G128", new Policy(Rule.V31, 96), new Policy(Rule.V31, 128)),
+        new Config("G192", new Policy(Rule.V31, 96), new Policy(Rule.V31, 192)),
+        new Config("ASK", new Policy(Rule.SPRAY, 96), new Policy(Rule.SPRAY, 255)),
+        new Config("ALL", new Policy(Rule.EPIDEMIC, INF), new Policy(Rule.EPIDEMIC, INF)));
 
     static final int[] GROUP_SIZES = {5, 30, 128};
     static final int GROUPS_PER_SIZE = 3, MESSAGES_PER_GROUP = 10, JUNK = 10;
@@ -193,9 +207,10 @@ public class CopyCountSim {
         final int[] copies;                   // 0 = not holding
         final byte[] hops;
         final boolean[] has;                  // holds it now, or had it, or is a reached recipient
+        final boolean[] gotLast;              // v3.1: was sent a last copy, whatever it did with it
         final int[] handOns;
         final double[] reachedAt;
-        int strangers, transmissions, reached;
+        int strangers, transmissions, reached, dropped;   // dropped: last copies a non-recipient threw away
         boolean alive = false, expired = false;
 
         Msg(int id, int n, int sender, int recipient, boolean group, boolean junk, int groupSize,
@@ -203,7 +218,7 @@ public class CopyCountSim {
             this.id = id; this.sender = sender; this.recipient = recipient; this.group = group;
             this.junk = junk; this.groupSize = groupSize; this.member = member; this.created = created;
             this.policy = policy;
-            copies = new int[n]; hops = new byte[n]; has = new boolean[n]; handOns = new int[n];
+            copies = new int[n]; hops = new byte[n]; has = new boolean[n]; gotLast = new boolean[n]; handOns = new int[n];
             reachedAt = new double[n];
             Arrays.fill(reachedAt, -1);
         }
@@ -321,18 +336,26 @@ public class CopyCountSim {
             if (m.reachedAt[p] < 0) { m.reachedAt[p] = t; m.reached++; }
         }
 
+        int linkBudget, phoneBudget;          // this step's budgets, 40 and 100 a minute on average
+
         /** Tries to pass m from a to b. Returns 1 if sent, 0 if the rule says no, -1 if out of budget. */
         int offer(Msg m, int a, int b, double t, int[] linkUsed, int[] recv, int dir) {
             if (!m.alive || m.copies[a] == 0) return 0;
-            if (m.has[b]) {
-                // b already has it. A one-to-one recipient answers DELIVERED and the carrier deletes.
-                if (!m.group && b == m.recipient && a != m.sender) drop(m, a);
+            if (t - m.created >= LIFETIME) return 0;               // exact deadline
+            Policy pol = m.policy;
+            if (pol.rule() != Rule.V31 && m.has[b]) {
+                // Earlier rules only: a one-to-one recipient answers DELIVERED and the carrier deletes.
+                if (pol.rule() == Rule.SPRAY && !m.group && b == m.recipient && a != m.sender) drop(m, a);
                 return 0;
             }
-            if (m.hops[a] >= MAX_HOPS) return 0;
+            boolean endpoint = m.group ? m.isMember(b) : b == m.recipient;
+            // hops[] holds forwards left, like the hop byte. The sender sends it unchanged;
+            // each carrier forward lowers it by one. An endpoint may accept 0; a carrier never stores 0.
+            int newHops = a == m.sender ? m.hops[a] : m.hops[a] - 1;
+            if (newHops < 0 || (newHops == 0 && !endpoint)) return 0;
+            if (pol.rule() == Rule.V31) return offerV31(m, a, b, t, linkUsed, recv, dir, endpoint, newHops);
             int give;
             boolean keep;            // whether a keeps its copy count unchanged
-            Policy pol = m.policy;
             if (!m.group) {
                 if (b == m.recipient) { give = -1; keep = false; }
                 else if (pol.rule() == Rule.EPIDEMIC) { give = INF; keep = true; }
@@ -352,7 +375,7 @@ public class CopyCountSim {
                     }
                 }
             }
-            if (linkUsed[dir] >= LINK_BUDGET || recv[b] >= PHONE_BUDGET) return -1;
+            if (linkUsed[dir] >= linkBudget || recv[b] >= phoneBudget) return -1;
             linkUsed[dir]++; recv[b]++;
             m.transmissions++;
             if (!m.group && b == m.recipient) {
@@ -365,9 +388,41 @@ public class CopyCountSim {
             }
             if (!keep) m.copies[a] -= give;
             if (pol.rule() == Rule.HANDON) m.handOns[a]++;
-            hold(m, b, give, m.hops[a] + 1);
+            hold(m, b, give, newHops);
             if (!m.isMember(b) && b != m.recipient) m.strangers++;
             if (m.isMember(b)) reach(m, b, t);
+            dirtyLinksOf(b);
+            return 1;
+        }
+
+        int offerV31(Msg m, int a, int b, double t, int[] linkUsed, int[] recv, int dir, boolean endpoint, int newHops) {
+            boolean last = m.copies[a] == 1;
+            // has[]: holds a split allocation (or is the sender). gotLast[]: was sent a last copy,
+            // whatever it did with it. Either declines another last copy; only has[] declines a
+            // split, so recipients, members and strangers who got a last copy all answer alike.
+            if (m.has[b] || (last && m.gotLast[b])) return 0;
+            if (linkUsed[dir] >= linkBudget || recv[b] >= phoneBudget) return -1;
+            linkUsed[dir]++; recv[b]++;
+            m.transmissions++;
+            if (!last) {                                           // split: b carries half, whatever it is
+                int give = m.copies[a] / 2;
+                m.copies[a] -= give;
+                hold(m, b, m.copies[b] + give, newHops);
+                if (endpoint) reach(m, b, t); else m.strangers++;
+            } else if (m.group && endpoint) {                      // last copy to a member: it keeps one
+                hold(m, b, 1, newHops);
+                m.has[b] = false;                                  // still takes a split later
+                m.gotLast[b] = true;
+                reach(m, b, t);
+            } else if (endpoint) {                                 // last copy to the recipient: its own message
+                m.gotLast[b] = true;
+                reach(m, b, t);
+            } else {                                               // last copy to anyone else: dropped
+                m.gotLast[b] = true;                               // remembered for 24 hours
+                m.dropped++;
+                return 1;
+            }
+            if (!m.group && endpoint) drop(m, m.sender);           // receipt modelled as instant
             dirtyLinksOf(b);
             return 1;
         }
@@ -435,17 +490,12 @@ public class CopyCountSim {
                 while (next < msgs.size() && msgs.get(next).created <= t) {
                     Msg m = msgs.get(next++);
                     m.alive = true;
-                    hold(m, m.sender, m.policy.copies(), 0);
+                    hold(m, m.sender, m.policy.copies(), MAX_HOPS);
                     if (m.isMember(m.sender)) m.reachedAt[m.sender] = t;   // the sender is not counted as reached
                     dirtyLinksOf(m.sender);
                     live.add(m);
                 }
-                int[] recv = new int[n];
-                List<int[]> dirty = new ArrayList<>();
-                for (int[] l : links.values()) if (l[2] == 1) dirty.add(l);
-                Collections.shuffle(dirty, new Random((long) t ^ seed));
-                for (int[] l : dirty) exchange(l, t, recv);
-                for (Iterator<Msg> it = live.iterator(); it.hasNext(); ) {
+                for (Iterator<Msg> it = live.iterator(); it.hasNext(); ) {   // expire before any transfer
                     Msg m = it.next();
                     if (t - m.created >= LIFETIME) {
                         for (int p = 0; p < n; p++) drop(m, p);
@@ -453,6 +503,15 @@ public class CopyCountSim {
                         it.remove();
                     }
                 }
+                long i = Math.round(t / DT);
+                double perStep = DT / 60;
+                linkBudget = (int) (Math.floor((i + 1) * LINK_PER_MIN * perStep) - Math.floor(i * LINK_PER_MIN * perStep));
+                phoneBudget = (int) (Math.floor((i + 1) * PHONE_PER_MIN * perStep) - Math.floor(i * PHONE_PER_MIN * perStep));
+                int[] recv = new int[n];
+                List<int[]> dirty = new ArrayList<>();
+                for (int[] l : links.values()) if (l[2] == 1) dirty.add(l);
+                Collections.shuffle(dirty, new Random((long) t ^ seed));
+                for (int[] l : dirty) exchange(l, t, recv);
             }
             return new Result(sc, cfg, seed, msgs, peakHeld);
         }
@@ -463,7 +522,7 @@ public class CopyCountSim {
     // ---- reporting --------------------------------------------------------------------
     record Row(String scenario, String config, String kind, String policy, long seed,
                double delivered, double allReached, double medianDelayH, double p90DelayH,
-               double strangers, double transmissions, int peakStore, double meanPeakStore) {}
+               double strangers, double transmissions, double dropped, int peakStore, double meanPeakStore) {}
 
     static List<Row> rows(Result r) {
         List<Row> out = new ArrayList<>();
@@ -471,20 +530,21 @@ public class CopyCountSim {
         double meanPeak = Arrays.stream(r.peakHeld()).average().orElse(0);
         // one-to-one
         List<Msg> direct = r.msgs().stream().filter(m -> !m.group).toList();
-        out.add(summarise(r, "one-to-one", r.cfg().direct().label(), direct, peak, meanPeak));
+        String label = r.cfg().direct().label() + " / " + r.cfg().group().label();
+        out.add(summarise(r, "one-to-one", label, direct, peak, meanPeak));
         for (int g : GROUP_SIZES) {
             List<Msg> gm = r.msgs().stream().filter(m -> m.group && !m.junk && m.groupSize == g).toList();
-            if (!gm.isEmpty()) out.add(summarise(r, "group " + g, r.cfg().group().label(), gm, peak, meanPeak));
+            if (!gm.isEmpty()) out.add(summarise(r, "group " + g, label, gm, peak, meanPeak));
         }
         List<Msg> junk = r.msgs().stream().filter(m -> m.junk).toList();
-        out.add(summarise(r, "junk", r.cfg().group().label(), junk, peak, meanPeak));
+        out.add(summarise(r, "junk", label, junk, peak, meanPeak));
         return out;
     }
 
     static Row summarise(Result r, String kind, String policy, List<Msg> ms, int peak, double meanPeak) {
         double delivered = 0, all = 0;
         List<Double> delays = new ArrayList<>();
-        double strangers = 0, tx = 0;
+        double strangers = 0, tx = 0, dropped = 0;
         for (Msg m : ms) {
             int wanted = m.group ? (m.junk ? 0 : m.groupSize - 1) : 1;
             int got = 0;
@@ -495,6 +555,7 @@ public class CopyCountSim {
             if (wanted > 0) { delivered += (double) got / wanted; if (got == wanted) all++; }
             strangers += m.strangers;
             tx += m.transmissions;
+            dropped += m.dropped;
         }
         Collections.sort(delays);
         int k = ms.size();
@@ -502,7 +563,7 @@ public class CopyCountSim {
             100 * delivered / k, 100 * all / k,
             delays.isEmpty() ? Double.NaN : delays.get(delays.size() / 2),
             delays.isEmpty() ? Double.NaN : delays.get((int) (delays.size() * 0.9)),
-            strangers / k, tx / k, peak, meanPeak);
+            strangers / k, tx / k, dropped / k, peak, meanPeak);
     }
 
     public static void main(String[] args) throws Exception {
@@ -536,10 +597,10 @@ public class CopyCountSim {
         pool.shutdown();
         Files.createDirectories(Path.of(out));
         try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(Path.of(out, "results.csv")))) {
-            w.println("scenario,config,kind,policy,seed,delivered_pct,all_reached_pct,median_delay_h,p90_delay_h,strangers,transmissions,peak_store,mean_peak_store");
-            for (Row r : all) w.printf(Locale.ROOT, "%s,%s,%s,%s,%d,%.2f,%.2f,%.3f,%.3f,%.2f,%.2f,%d,%.2f%n",
+            w.println("scenario,config,kind,policy,seed,delivered_pct,all_reached_pct,median_delay_h,p90_delay_h,strangers,transmissions,dropped,peak_store,mean_peak_store");
+            for (Row r : all) w.printf(Locale.ROOT, "%s,%s,%s,%s,%d,%.2f,%.2f,%.3f,%.3f,%.2f,%.2f,%.2f,%d,%.2f%n",
                 r.scenario(), r.config(), r.kind(), r.policy(), r.seed(), r.delivered(), r.allReached(),
-                r.medianDelayH(), r.p90DelayH(), r.strangers(), r.transmissions(), r.peakStore(), r.meanPeakStore());
+                r.medianDelayH(), r.p90DelayH(), r.strangers(), r.transmissions(), r.dropped(), r.peakStore(), r.meanPeakStore());
         }
         try (PrintWriter w = new PrintWriter(Files.newBufferedWriter(Path.of(out, "summary.md")))) {
             w.printf("# Copy-count simulation results%n%n%d seeds per scenario. Mean across seeds, with the spread (one standard deviation) after ±.%n", seeds);
@@ -552,19 +613,19 @@ public class CopyCountSim {
                 for (var kind : sc.getValue().entrySet()) {
                     w.printf("%n### %s%n%n", kind.getKey());
                     boolean junk = kind.getKey().equals("junk");
-                    w.println(junk ? "| Rule | Strangers carrying each message | Sends per message |"
-                                   : "| Rule | Reached | All reached | Median delay (h) | 90% within (h) | Strangers carrying | Sends per message |");
-                    w.println(junk ? "| --- | --- | --- |" : "| --- | --- | --- | --- | --- | --- | --- |");
+                    w.println(junk ? "| One-to-one / group rule | Strangers storing each message | Phones sent it that dropped it | Sends per message |"
+                                   : "| One-to-one / group rule | Reached | All reached | Median delay (h) | 90% within (h) | Strangers storing | Dropped last copies | Sends per message |");
+                    w.println(junk ? "| --- | --- | --- | --- |" : "| --- | --- | --- | --- | --- | --- | --- | --- |");
                     Map<String, List<Row>> byPol = new LinkedHashMap<>();
-                    for (Row r : kind.getValue()) byPol.computeIfAbsent(r.config() + " " + r.policy(), k -> new ArrayList<>()).add(r);
+                    for (Row r : kind.getValue()) byPol.computeIfAbsent(r.policy(), k -> new ArrayList<>()).add(r);
                     for (var p : byPol.entrySet()) {
                         List<Row> rs = p.getValue();
-                        String label = p.getKey().substring(2);
-                        if (junk) w.printf(Locale.ROOT, "| %s | %s | %s |%n", label,
-                            ms(rs, Row::strangers, 0), ms(rs, Row::transmissions, 0));
-                        else w.printf(Locale.ROOT, "| %s | %s%% | %s%% | %s | %s | %s | %s |%n", label,
+                        String label = p.getKey();
+                        if (junk) w.printf(Locale.ROOT, "| %s | %s | %s | %s |%n", label,
+                            ms(rs, Row::strangers, 1), ms(rs, Row::dropped, 0), ms(rs, Row::transmissions, 0));
+                        else w.printf(Locale.ROOT, "| %s | %s%% | %s%% | %s | %s | %s | %s | %s |%n", label,
                             ms(rs, Row::delivered, 1), ms(rs, Row::allReached, 0), ms(rs, Row::medianDelayH, 1),
-                            ms(rs, Row::p90DelayH, 1), ms(rs, Row::strangers, 0), ms(rs, Row::transmissions, 0));
+                            ms(rs, Row::p90DelayH, 1), ms(rs, Row::strangers, 0), ms(rs, Row::dropped, 0), ms(rs, Row::transmissions, 0));
                     }
                 }
                 w.printf("%n### Carrier storage (most envelopes held by one phone at once)%n%n| Config | Busiest phone | Average phone |%n| --- | --- | --- |%n");

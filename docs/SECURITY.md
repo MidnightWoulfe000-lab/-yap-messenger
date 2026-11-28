@@ -13,7 +13,7 @@ This document preserves the security direction discussed for Yap. It is **not** 
 - End-to-end encrypted conversations and groups, with relays unable to decrypt payloads.
 - Authenticated pseudonymous identities, signed group membership and signed governance events.
 - No mandatory central authority, server, SIM or phone-number account.
-- Secure multi-device authorisation and device revocation.
+- One device per identity (owner, 27 November 2026). A lost device is cut off by its contacts removing it and by group revocation of the member; the person starts again with a new identity.
 - Store-and-forward resilience to outages and partitions, with bounded resource use.
 - Minimise exposure of message content and metadata. Offline mesh cannot guarantee anonymity or conceal radio proximity.
 
@@ -24,17 +24,17 @@ This document preserves the security direction discussed for Yap. It is **not** 
 - Compromised operating systems and physical access cannot be solved solely by app-layer encryption.
 
 ## Required protocol properties
-1. **Identity:** cryptographically generated keys; explicit verification UX; device-level keys and authorisation; signed revocation.
+1. **Identity:** cryptographically generated keys; explicit verification UX; one device per identity; signed revocation of members.
 2. **Encryption:** use established, reviewed primitives and protocols; authenticated encryption, fresh nonces, replay protection, key separation, forward secrecy where feasible, and a documented recovery/rotation story. No homemade crypto.
 3. **Groups:** authenticated membership changes, encrypted group state, independently verifiable approvals, objection windows and votes. Define who can vote, quorum, thresholds, timeouts, ordering and partition resolution before writing code.
 4. **Routing:** opaque encrypted envelopes; message IDs and bounded TTL; deduplication; rate limits; safe queue expiry; no trusted-relay assumption.
-5. **Persistence:** protect keys at rest using platform facilities; define backup, multi-device recovery and deletion semantics. Avoid logging secrets and plaintext.
+5. **Persistence:** protect keys at rest using platform facilities; define backup and deletion semantics (see the [local storage proposal](proposals/local-storage-v1.md)). Avoid logging secrets and plaintext.
 6. **UX:** distinguish discovered, connected, identity-verified, queued, relayed, transport-acknowledged, delivered and read. Never infer delivery or identity from BLE success.
 7. **Testing:** protocol test vectors, malformed packet handling, replay and tampering tests, lost-device/revocation tests, partition/rejoin tests, and independent review.
 
 ## Decisions still requiring an explicit specification
 - Exact cryptographic protocol, primitives, identity-key hierarchy and group key schedule.
-- Whether identities are recoverable, how new devices join, and how a lost device is revoked while peers are offline.
+- How a lost device is revoked while peers are offline. (Identities are not recoverable and there are no extra devices: owner, 27 November 2026.)
 - Group approval thresholds, voting rules, objection period duration and handling of competing histories during partitions.
 - Message TTL, queue/storage quotas, routing incentives or abuse protections, and metadata minimisation trade-offs.
 - Key verification UX, backup strategy and whether any internet relay services exist.

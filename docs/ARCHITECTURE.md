@@ -18,12 +18,12 @@ This is a handover of decisions from the Yap planning conversations, not a claim
 
 ## Identity and membership
 - Pseudonymous cryptographic identity rather than a phone-number directory.
-- Multiple devices per identity are a design goal. Device keys, authorisation and revocation need explicit protocols.
+- **One device per identity** (owner, 27 November 2026). Multiple devices per identity are no longer planned. A lost or replaced phone starts a new identity and re-pairs with its contacts and groups.
 - Group membership must be cryptographically authenticated. Merely discovering a Bluetooth device does not establish identity.
 
 ## Group governance direction
 - Invitations and membership changes are not unilateral: independent member approval, objection windows and group votes are part of the planned model.
-- Membership decisions, permissions and device revocation require signed records and consistent verification rules.
+- Membership decisions, permissions and member revocation require signed records and consistent verification rules.
 - Partition behaviour, vote thresholds, time windows, tie handling, membership changes during votes and recovery are **not fully specified** here. Do not invent policy in implementation. Surface the decision for review first.
 
 ## Message model and product behaviour

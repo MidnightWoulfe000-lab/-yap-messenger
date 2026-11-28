@@ -40,8 +40,9 @@ beside the group marker. (v3.1 §1.1, §2.3, §2.4)
 - A random pair secret, replaced over time.
 - 128 contacts.
 - Internet relay off, shown as "Coming soon".
-- A separate proposal for an emergency wipe ("go anonymous") button:
-  [emergency-wipe.md](../proposals/emergency-wipe.md).
+- An Enhanced security setting to stop friend recognition, for everyone or per friend
+  (v3.1 §3.9). This replaces a full-wipe draft written by mistake: the owner asked for a
+  way to stop broadcasting recognition, not to delete everything.
 
 ## Still open
 

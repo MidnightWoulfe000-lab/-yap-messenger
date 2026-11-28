@@ -118,8 +118,10 @@ after rotation is harmless: the original relay's 10-minute recent cache refuses 
 
 Owner decisions (25 Nov 2026): limited-copy routing with 12 copies, and an effort stamp.
 **Changing in mesh v3.1** (owner, 27 Nov 2026): 96 copies for one-to-one envelopes, after
-a simulation; see [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) §1.3. Not built
-yet; the code still uses 12.
+a simulation; see [local mesh v3.1](local-mesh-v3.1-group-envelopes.md) §1.3. v3.1 also
+retires DELIVERED and sends a last copy to every phone met, only the recipient keeping
+it, so nobody announces which messages are theirs (§1.2 to §1.4). Not built yet; the
+code still uses 12 copies and DELIVERED.
 
 **Frame:** nearby ENVELOPE frames are now `copies (1) + effort stamp (8) + envelope`.
 New frame DELIVERED (8, 48-byte relay key) means "I am the recipient and have it".
@@ -150,8 +152,10 @@ it on unchanged. It slows phone-based spam; a laptop can still mint many per min
 so flood slow mode and limited copies stay the main defences.
 
 **Accepted trade-offs and gaps:**
-- A modified app can lie about copies (claim 12 every time). That only spreads its
-  own messages further; flood slow mode still limits how many it can push.
+- A modified app can lie about copies (claim 12 every time). That spreads its own
+  messages further, and also any envelope it carries for others (corrected after the
+  v3.1 review, 27 Nov 2026); flood slow mode and each phone's storage limits still
+  bound what reaches any one phone.
 - A modified app can send DELIVERED for envelopes it is not the recipient of, making
   that one carrier drop its copy. Other copies survive.
 - No phone-wide "delivered" signal yet: other copies wander until they expire (24 h).

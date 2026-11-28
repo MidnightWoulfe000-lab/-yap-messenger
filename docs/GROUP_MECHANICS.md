@@ -120,19 +120,19 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - Whether past messages and historical governance events are accessible to newcomers.
 - ~~How the history restriction is enforced cryptographically, rather than merely hidden by the interface.~~ **Decided (proposed by Claude after the Codex review, accepted by user, 26 November 2026):** a newcomer's phone receives the **full governance log** (joins, votes, removals), so it can check every event itself, but **never earlier chat**, which stays unreadable because of sender keys. The app shows the newcomer only history from their own join onwards. This is enforced by the app, not by encryption: a modified app could show the earlier governance history.
 
-## 5. Multiple devices and revocation
+## 5. Revocation
+
+**Decided (owner, 27 November 2026): one device per member.** Secondary devices are no longer planned, so there are no device records, no adding a device and no revoking one's own device. A member who loses their phone starts again with a new identity and is invited back like anyone else; the old identity is revoked by the group (below). The `AddDevice` and own-device revocation events in `groups/` are removed in the mesh v3.1 update.
 
 **Agreed direction**
-- A person may have **secondary devices** associated with their identity.
-- A member may **revoke their own secondary device at any time**, without requiring a group vote.
-- A **group-initiated revocation** of a device or member requires a threshold of approvals rather than one person's unilateral action.
+- A **group-initiated revocation** of a member requires a threshold of approvals rather than one person's unilateral action.
 - **Three or four approvals** were discussed as a possible threshold, **not a final fixed number**.
 
 **Decided (user, 26 November 2026)**
-- **Groups of up to 5 members** need a **majority** to revoke a device or member.
+- **Groups of up to 5 members** need a **majority** to revoke a member.
 - **Groups of 6 or more** need **3 approvals**.
-- **Group revoking is a setting chosen at group creation.** It can be switched off, in which case the group cannot revoke anyone by vote. Members can still revoke their own secondary devices (above).
-- **Accepted risk:** with group revoking switched off, the group has no way to cut off a confiscated or compromised device. Only the owner's own actions (self-revocation, owner-triggered scramble in §6) remain. This is a hazard users accept by their choice at creation, and the creation screen must say so plainly.
+- **Group revoking is a setting chosen at group creation.** It can be switched off, in which case the group cannot revoke anyone by vote.
+- **Accepted risk:** with group revoking switched off, the group has no way to cut off a confiscated or compromised device. Only the owner's own actions (owner-triggered scramble in §6) remain. This is a hazard users accept by their choice at creation, and the creation screen must say so plainly.
 
 - In groups of 2–3 members a majority can be just 2 people. **Confirmed as intended.**
 - **Majority means a majority of all current members, not just of those who vote** (user, 26 November 2026). Not voting counts the same as voting no.
@@ -142,7 +142,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - **A vote always needs at least 2 votes when 2 or more people could vote** (user, 27 November 2026), so no one carries a vote alone in a group of 3 or more. **In a group of 2, nobody can remove the SuperAdmin.** The second Codex review found that the half-of-members rule alone still let one member take over a group of 3.
 - **The person being removed is not counted and cannot vote.** Example: in a 5-member group, revoking one member needs 3 of the other 4. In a 2-member group, the other member alone can revoke.
 - **A revoked member can come back through a new proposal** (user, 26 November 2026). It goes through the normal rules in §3: a sponsor, the objection window, approvals, and any objection blocks it.
-  - **They can come back on their old devices** (user, 26 November 2026); they only need a new invite. A device they revoked themselves, for example because it was lost, stays revoked (proposed by Claude, accepted by user, 26 November 2026).
+  - **They can come back on their old phone** (user, 26 November 2026); they only need a new invite.
   - Details stage one chose (need confirming): the earlier membership stays on record, and a proposal made before a later revocation cannot be used to bring them back, so approvals given in an earlier absence are not reused. After coming back they see joins from their new join onwards (§4).
 
 **Open**
@@ -151,7 +151,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - **A group holds at most 128 members for now** (user, 26 November 2026).
 - With group revoking switched off, how a confiscated device (§7) is dealt with.
 - Whether a sponsor has any special responsibility. (The target cannot vote: decided above.)
-- Distinction between removing a device, suspending a member, and expelling a member.
+- Distinction between suspending a member and expelling a member.
 - Whether the affected person can appeal or recover a replacement device. (Rejoining: decided above.)
 - How revocation rotates group encryption keys and protects subsequent messages.
 - How revoked devices are treated during offline periods and network partitions.
@@ -171,7 +171,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 **Decided (user, 26 November 2026)**
 - A scramble can be triggered in two ways:
   - **Automatically**, when a valid group revocation of that device takes effect, in a group created with group scramble on.
-  - **By the device's owner**, for example from another of their devices or a friend's phone if theirs is lost or taken.
+  - **By the device's owner**, for example from a friend's phone if theirs is lost or taken.
 
 - **Owner identity:** each device gets an **alphanumeric password**, set up with the profile. The owner uses it to prove who they are when triggering a scramble from a device other than the lost one, such as a friend's phone. This replaces the earlier idea of a PIN.
 - **Guess limit:** **5 wrong attempts**, then a **cooldown** before more attempts are allowed. The first cooldown is **30 minutes**, and each further lockout adds **30 minutes** (30, 60, 90 minutes and so on).
@@ -182,7 +182,7 @@ These are **product decisions**, not a complete consensus, security or cryptogra
   - Consequence to show users: a device kept offline for more than 24 hours will never receive the command. The owner would need to issue it again.
   - The 24 hours cannot rely on the target device's own clock, which its holder can change.
 - **Who checks the time (decided, user, 26 November 2026):** the **forwarding devices** authenticate the time. The issuing device signs the time it issued the command; each forwarding device checks that against its own clock, **drops** a command older than 24 hours, and signs that it was still valid when it passed it on. The target device accepts the forwarders' signed check instead of trusting its own clock.
-  - Only **group members' devices** (or the owner's own other devices) may vouch for the time. Under §12, a stranger relaying the packet carries it but its time check counts for nothing.
+  - Only **group members' devices** may vouch for the time. Under §12, a stranger relaying the packet carries it but its time check counts for nothing.
   - Forwarders' clocks can be wrong too, so checking the issue time against each forwarder's clock is not enough on its own.
 - **Clock errors: decided (proposed by Claude, accepted by user, 26 November 2026):** measure the command's **age**, not the time of day.
   - The command carries an age counter, starting at 0 when issued.
@@ -205,9 +205,8 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 
 **Open**
 - Whether the same password also authorises confiscation reports (§7) on the owner's own behalf.
-- Whether an automatic scramble also follows a self-revocation of a secondary device.
 - How the command is authenticated, queued and acknowledged.
-- Interaction with backups, screenshots, exported content and multiple devices.
+- Interaction with backups, screenshots and exported content.
 - Consent language and user expectations.
 
 ## 7. Confiscated-device reporting
@@ -216,14 +215,13 @@ These are **product decisions**, not a complete consensus, security or cryptogra
 - A member can report that another member's device has been **confiscated**, using a friend's phone if necessary.
 - The room receives the report and **votes** on the appropriate status/action.
 - The resulting status is propagated through the mesh, including to peers that reconnect later.
-- This is distinct from ordinary device self-revocation, since the person may no longer control their phone.
+- This is distinct from anything the person does themselves, since they may no longer control their phone.
 
 **Open**
 - How the reporter proves their identity, or how a third party is authorised to report on someone else's behalf.
 - Whether a report merely marks the device as suspect, suspends it temporarily, or triggers full revocation.
 - Vote threshold, duration, evidence, appeal, false-report protection and emergency behaviour.
 - How to avoid exposing the reporter or targeted person through public metadata.
-- Whether a confiscation status applies to one device or all devices of an identity.
 
 ## 8. Split networks and conflicting decisions
 
@@ -351,7 +349,7 @@ Group encryption (items 2 and 6) has a proposal: [group-encryption-v1.md](propos
 1. Define identities, device keys, room identifiers and signed event formats.
 2. Specify invitation QR contents and safe key distribution.
 3. Define the admission state machine, approval/objection timing and late-event handling.
-4. Define device self-revocation, group revocation and confiscation-vote state machines.
+4. Define group revocation and confiscation-vote state machines (one device per member).
 5. Define deterministic convergence for partitions without trusting device clocks.
 6. Define key rotation, access to past/future messages and metadata visibility.
 7. Specify and review the isolation fallback: how to detect uncertain revocation state, prompt the isolated subset to form a separately keyed temporary group, and safely reconcile on reconnection.

@@ -265,8 +265,9 @@ bundle is about 1,775 bytes, so it fits within the 8,192-byte event limit.
     clock differences. The window is coarse (a piece can be almost 26 hours
     old), so an envelope must also pass its own exact expiry and lifetime
     checks.
-  - **Associated data:** for an envelope, exactly the 68 bytes of
-    `Header::binding()` in `core/src/envelope.rs`. They already include the
+  - **Associated data:** for an envelope, exactly the bytes of
+    `Header::binding()` in `core/src/envelope.rs`: 68 today, 70 once local mesh
+    v3.1 §1.1 adds the routing class and starting copies. They already include the
     label (as the destination) and the creation time, and leave out the hop
     count that relays change. For a hand-over piece (3.9), its label (16) then
     its hour (8, big-endian), so a piece can move to a new batch unchanged.
@@ -697,14 +698,12 @@ it: **not an independent review**.
      the last one seen from that sender, before handing it to libsignal. The
      pinned API makes this possible: `SenderKeyMessage::iteration` reads the
      step number without decrypting.
-7. **Multiple devices.** *A planned future feature (user, 26 November 2026); for now, one device per member.* Each device would be its own
-   libsignal address with its own bundle, sessions and sending key, so
-   hand-overs grow with the number of devices. This needs its own proposal,
-   together with the device rules in §5 of the spec.
+7. **Multiple devices.** ~~A planned future feature.~~ **Dropped (owner, 27
+   November 2026):** one device per member, permanently. Hand-overs stay one per
+   member.
 
 Also still open: the review in 3.10, which depends on the local mesh design, and
-an independent review of the whole design. Multiple devices per member are a
-planned future feature; version 1 is one device per member.
+an independent review of the whole design.
 
 ## 6. Tests required before release
 
