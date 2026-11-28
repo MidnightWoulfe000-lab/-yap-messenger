@@ -37,7 +37,7 @@ internal fun YapApp(session: ChatSession, send: () -> Unit, discover: () -> Unit
         else if (secureId != null) ChatSummary(selectedChat, secureContact?.name ?: "Retired contact", secureContact?.phase ?: "Session retired") else liveChat(session)
     val realChats = secure.snapshot.contacts.map { contact ->
         val latest = secure.snapshot.history.lastOrNull { it.contact == contact.id }?.message
-        ChatSummary("secure:${contact.id}", contact.name, latest?.body ?: contact.phase, latest?.let { messageTime(it.createdAt) }.orEmpty(), contact.unread)
+        ChatSummary("secure:${contact.id}", contact.name, latest?.body ?: contact.phase, latest?.let { chatListTime(it.createdAt) }.orEmpty(), contact.unread)
     } + liveChat(session)
     fun back() {
         screen = when (screen) {

@@ -18,10 +18,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
+import java.time.ZoneId
 
 @Composable
 internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, preview: Boolean,
@@ -29,7 +32,11 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
     back: () -> Unit, controls: () -> Unit, group: () -> Unit, details: (Long) -> Unit,
     maxBytes: Int = 20, sendEnabled: Boolean = true, secure: Boolean = false) {
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size, pending) { if (messages.isNotEmpty()) listState.scrollToItem(messages.size) }
+    val locale = LocalConfiguration.current.locales[0]
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val rows = remember(messages, today, zone, locale) { withDaySeparators(messages, today, zone, locale) }
+    LaunchedEffect(rows.size, pending) { if (rows.isNotEmpty()) listState.scrollToItem(rows.lastIndex) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = White) }
@@ -51,11 +58,6 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
         HorizontalDivider(color = Surface2)
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("TODAY", color = Soft, style = MaterialTheme.typography.labelMedium)
-                }
-            }
             if (messages.isEmpty()) item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Forum, null, tint = Lime, modifier = Modifier.size(42.dp))
@@ -64,7 +66,12 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
                     Text(if (secure) "Messages stay queued until a connection is available." else "Two phones. No internet. Just Yap.", color = Soft, modifier = Modifier.padding(top = 8.dp))
                 }
             }
-            items(messages, key = { it.id }) { MessageBubble(it) { details(it.id) } }
+            items(rows, key = { it.key }, contentType = { it::class }) { row ->
+                when (row) {
+                    is ConversationRow.Day -> DaySeparator(row.label)
+                    is ConversationRow.Message -> MessageBubble(row.message) { details(row.message.id) }
+                }
+            }
             if (!preview && (pending || messages.lastOrNull()?.failureReason != null || status.contains("permission", true))) item {
                 Text(status, style = MaterialTheme.typography.bodySmall, color = Soft,
                     modifier = Modifier.padding(vertical = 12.dp).semantics { liveRegion = LiveRegionMode.Polite })
@@ -74,6 +81,14 @@ internal fun ConversationScreen(chat: ChatSummary, messages: List<ChatMessage>, 
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp))
         if (secure && !sendEnabled) Text(status, color = Soft, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         Composer(draft = if (preview) "" else draft, onDraft = onDraft, pending = pending, enabled = !preview && sendEnabled, send = send, maxBytes = maxBytes)
+    }
+}
+
+/** Small, centred, muted label where the day changes. A heading, so screen readers can jump between days. */
+@Composable
+private fun DaySeparator(label: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = Soft, style = MaterialTheme.typography.labelMedium, modifier = Modifier.semantics { heading() })
     }
 }
 

@@ -16,17 +16,14 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 /** Explicitly labelled, read-only fixtures. Never passed to the Bluetooth transport. */
-internal val previewChats = listOf(
-    ChatSummary("ravi", "Ravi", "You: Meeting at the café?", "2:28 PM"),
-    ChatSummary("anfield", "Anfield Crew", "Priya: See you there.", "2:14 PM", 3, true),
-    ChatSummary("maya", "Maya", "File: route_map.jpg", "1:03 PM"),
-    ChatSummary("design", "Design Circle", "Arjun: New mockups are in", "12:11 PM", group = true),
-    ChatSummary("updates", "Yap updates", "What's new in Yap", "11:47 AM")
-)
+private fun sampleTime(hour: Int, minute: Int, daysAgo: Long = 0) =
+    LocalDate.now().minusDays(daysAgo).atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-private fun sampleTime(hour: Int, minute: Int) = LocalDate.now().atTime(hour, minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
+/** Spans several days so the preview shows day separators: last week, yesterday late evening, then today. */
 internal val previewMessages = listOf(
+    ChatMessage(false, "Are you coming to the match on Saturday?", id = 98, createdAt = sampleTime(18, 40, daysAgo = 4)),
+    ChatMessage(true, "Wouldn't miss it.", id = 99, createdAt = sampleTime(18, 52, daysAgo = 4)),
+    ChatMessage(false, "Still up? Lost my notes from today.", id = 100, createdAt = sampleTime(22, 0, daysAgo = 1)),
     ChatMessage(false, "Are you still around Anfield?", id = 101, createdAt = sampleTime(14, 20)),
     ChatMessage(true, "Yeah, just left the shop.", id = 102, createdAt = sampleTime(14, 23)),
     ChatMessage(false, "Nice. Can you send the notes?", id = 103, createdAt = sampleTime(14, 24)),
@@ -37,11 +34,21 @@ internal val previewMessages = listOf(
 
 internal fun previewConversation(chat: String): List<ChatMessage> = when (chat) {
     "anfield" -> listOf(ChatMessage(false, "See you there.", id = 201, createdAt = sampleTime(14, 14)))
-    "design" -> listOf(ChatMessage(false, "New mockups are in", id = 202, createdAt = sampleTime(12, 11)))
+    "design" -> listOf(ChatMessage(false, "New mockups are in", id = 202, createdAt = sampleTime(12, 11, daysAgo = 1)))
     "maya" -> listOf(ChatMessage(false, "route_map.jpg", id = 203, createdAt = sampleTime(13, 3), fileName = "route_map.jpg", fileSize = "Sample attachment"))
-    "updates" -> listOf(ChatMessage(false, "Explore the design preview. These are sample messages, not live network updates.", id = 204, createdAt = sampleTime(11, 47)))
+    "updates" -> listOf(ChatMessage(false, "Explore the design preview. These are sample messages, not live network updates.", id = 204, createdAt = sampleTime(11, 47, daysAgo = 9)))
     else -> previewMessages
 }
+
+private fun previewTime(chat: String) = chatListTime(previewConversation(chat).last().createdAt)
+
+internal val previewChats = listOf(
+    ChatSummary("ravi", "Ravi", "You: Meeting at the café?", previewTime("ravi")),
+    ChatSummary("anfield", "Anfield Crew", "Priya: See you there.", previewTime("anfield"), 3, true),
+    ChatSummary("maya", "Maya", "File: route_map.jpg", previewTime("maya")),
+    ChatSummary("design", "Design Circle", "Arjun: New mockups are in", previewTime("design"), group = true),
+    ChatSummary("updates", "Yap updates", "What's new in Yap", previewTime("updates"))
+)
 
 @Composable
 internal fun GroupDetailsScreen(chat: ChatSummary, back: () -> Unit, message: () -> Unit) {

@@ -24,7 +24,7 @@ internal data class ChatSummary(val id: String, val name: String, val snippet: S
 internal fun liveChat(session: ChatSession): ChatSummary {
     val latest = (session.messages.toList() + listOfNotNull(session.lastAttempt)).maxByOrNull { it.id }
     return ChatSummary("nearby", "Nearby Yap phone", latest?.body ?: "Start a Bluetooth conversation",
-        latest?.let { messageTime(it.createdAt) } ?: "", session.unreadCount)
+        latest?.let { chatListTime(it.createdAt) } ?: "", session.unreadCount)
 }
 
 @Composable

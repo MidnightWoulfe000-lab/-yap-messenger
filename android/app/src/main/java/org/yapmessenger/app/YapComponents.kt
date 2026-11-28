@@ -32,8 +32,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-internal fun messageTime(value: Long): String = if (value == 0L) "" else
-    DateTimeFormatter.ofPattern("h:mm a", Locale.UK).withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(value))
+internal fun messageTime(value: Long, zone: ZoneId = ZoneId.systemDefault()): String = if (value == 0L) "" else
+    DateTimeFormatter.ofPattern("h:mm a", Locale.UK).withZone(zone).format(Instant.ofEpochMilli(value))
 
 /** Raised, softly lit surface used for cards and bubbles. */
 internal fun Modifier.yapSurface(shape: Shape): Modifier = this.clip(shape)
